@@ -3,12 +3,7 @@ export default defineNuxtConfig({
   modules: ['@element-plus/nuxt'],
   css: ['element-plus/dist/index.css'],
   build: {
-    transpile: ['element-plus', 'dayjs']
-  },
-  vite: {
-    optimizeDeps: {
-      include: ['dayjs']
-    }
+    transpile: ['element-plus']
   },
   runtimeConfig: {
     public: {
