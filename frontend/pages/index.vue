@@ -70,8 +70,7 @@ const config = useRuntimeConfig()
 const router = useRouter()
 
 const { data: animeList, refresh } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
-  default: () => [],
-  server: false // 只在客户端执行，避免重复请求
+  default: () => []
 })
 
 const showCreateDialog = ref(false)

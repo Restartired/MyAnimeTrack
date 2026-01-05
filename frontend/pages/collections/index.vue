@@ -59,8 +59,7 @@ const router = useRouter()
 const { data: collections, refresh } = await useFetch<Collection[]>(
   `${config.public.apiBase}/collections`,
   {
-    default: () => [],
-    server: false // 只在客户端执行，避免重复请求
+    default: () => []
   }
 )
 
