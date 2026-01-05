@@ -2,6 +2,14 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   modules: ['@element-plus/nuxt'],
   css: ['element-plus/dist/index.css'],
+  build: {
+    transpile: ['element-plus', 'dayjs']
+  },
+  vite: {
+    optimizeDeps: {
+      include: ['dayjs']
+    }
+  },
   runtimeConfig: {
     public: {
       apiBase: 'http://127.0.0.1:8000'
