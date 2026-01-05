@@ -1,0 +1,11 @@
+export default defineNuxtConfig({
+  devtools: { enabled: true },
+  modules: ['@element-plus/nuxt'],
+  css: ['element-plus/dist/index.css'],
+  runtimeConfig: {
+    public: {
+      apiBase: 'http://127.0.0.1:8000'
+    }
+  },
+  compatibilityDate: '2024-01-01'
+})
