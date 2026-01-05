@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-from typing import List
+from typing import List, Optional
+import requests
 
 from db import get_conn
 
@@ -390,3 +391,84 @@ def get_collection_anime(collection_id: int):
     ]
 
 
+
+
+# GET /bangumi/search（搜索 Bangumi）
+@app.get("/bangumi/search")
+def search_bangumi(query: str):
+    """搜索 Bangumi 番剧"""
+    try:
+        # Bangumi 搜索 API
+        search_response = requests.get(
+            f"https://api.bgm.tv/search/subject/{query}",
+            params={"type": 2, "responseGroup": "large"},  # type=2 表示动画
+            headers={"User-Agent": "MyAnimeTrack/1.0 (https://github.com/yourusername/MyAnimeTrack)"},
+            timeout=10
+        )
+        search_response.raise_for_status()
+        search_data = search_response.json()
+        
+        # 格式化搜索结果
+        results = []
+        for item in search_data.get("list", [])[:10]:  # 最多返回10个结果
+            # 获取详细信息
+            subject_id = item.get("id")
+            if subject_id:
+                try:
+                    detail_response = requests.get(
+                        f"https://api.bgm.tv/v0/subjects/{subject_id}",
+                        headers={"User-Agent": "MyAnimeTrack/1.0"},
+                        timeout=10
+                    )
+                    detail_response.raise_for_status()
+                    detail_data = detail_response.json()
+                    
+                    # 提取开播日期
+                    start_date = detail_data.get("date")
+                    if start_date and len(start_date) >= 10:
+                        start_date = start_date[:10]  # 只取日期部分
+                    else:
+                        start_date = None
+                    
+                    # 提取总集数
+                    total_episodes = detail_data.get("eps") or detail_data.get("total_episodes")
+                    
+                    # 提取封面图片
+                    images = detail_data.get("images", {})
+                    cover_image = images.get("large") or images.get("common") or images.get("medium")
+                    
+                    results.append({
+                        "id": subject_id,
+                        "title": detail_data.get("name_cn") or detail_data.get("name"),
+                        "name_jp": detail_data.get("name"),
+                        "name_cn": detail_data.get("name_cn"),
+                        "start_date": start_date,
+                        "total_episodes": total_episodes,
+                        "cover_image": cover_image,
+                        "summary": detail_data.get("summary", ""),
+                        "source_id": f"BGM-{subject_id}"
+                    })
+                except Exception as e:
+                    # 如果获取详情失败，使用搜索结果中的基本信息
+                    images = item.get("images", {}) if item.get("images") else {}
+                    cover_image = images.get("large") or images.get("common") if images else None
+                    results.append({
+                        "id": subject_id,
+                        "title": item.get("name_cn") or item.get("name"),
+                        "name_jp": item.get("name"),
+                        "name_cn": item.get("name_cn"),
+                        "start_date": None,
+                        "total_episodes": item.get("eps"),
+                        "cover_image": cover_image,
+                        "summary": item.get("summary", ""),
+                        "source_id": f"BGM-{subject_id}"
+                    })
+                    continue
+        
+        return {"results": results}
+    except requests.Timeout:
+        return {"error": "请求超时，请稍后重试", "results": []}
+    except requests.RequestException as e:
+        return {"error": f"Bangumi API 错误: {str(e)}", "results": []}
+    except Exception as e:
+        return {"error": f"搜索失败: {str(e)}", "results": []}
