@@ -154,10 +154,20 @@ const config = useRuntimeConfig()
 const animeId = computed(() => parseInt(route.params.id as string))
 
 // 获取番剧列表
-const { data: animeList, refresh: refreshAnimeList } = await useFetch<Anime[]>(
-  `${config.public.apiBase}/anime`,
-  { default: () => [] }
-)
+const animeList = ref<Anime[]>([])
+
+const loadAnimeList = async () => {
+  try {
+    const data = await $fetch<Anime[]>(`${config.public.apiBase}/anime`)
+    animeList.value = data || []
+  } catch (error) {
+    console.error('加载番剧列表失败:', error)
+    animeList.value = []
+  }
+}
+
+// 初始加载
+await loadAnimeList()
 
 // 查找当前番剧
 const anime = computed(() => {
@@ -212,7 +222,7 @@ await loadData()
 
 // 监听路由参数变化
 watch(() => route.params.id, async () => {
-  await refreshAnimeList()
+  await loadAnimeList()
   await loadData()
 })
 

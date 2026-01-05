@@ -83,25 +83,51 @@ const router = useRouter()
 const collectionId = parseInt(route.params.id as string)
 
 // 获取所有收藏夹以查找当前收藏夹信息（由于没有单独的 GET /collections/{id}）
-const { data: collections } = await useFetch<Collection[]>(
-  `${config.public.apiBase}/collections`,
-  {
-    default: () => []
+const collections = ref<Collection[]>([])
+const animeList = ref<Anime[]>([])
+const allAnimeList = ref<Anime[]>([])
+
+const loadCollections = async () => {
+  try {
+    const data = await $fetch<Collection[]>(`${config.public.apiBase}/collections`)
+    collections.value = data || []
+  } catch (error) {
+    console.error('加载收藏夹列表失败:', error)
+    collections.value = []
   }
-)
+}
+
+const loadAnimeList = async () => {
+  try {
+    const data = await $fetch<Anime[]>(
+      `${config.public.apiBase}/collections/${collectionId}/anime`
+    )
+    animeList.value = data || []
+  } catch (error) {
+    console.error('加载收藏夹番剧列表失败:', error)
+    animeList.value = []
+  }
+}
+
+const loadAllAnimeList = async () => {
+  try {
+    const data = await $fetch<Anime[]>(`${config.public.apiBase}/anime`)
+    allAnimeList.value = data || []
+  } catch (error) {
+    console.error('加载所有番剧列表失败:', error)
+    allAnimeList.value = []
+  }
+}
+
+// 初始加载
+await Promise.all([
+  loadCollections(),
+  loadAnimeList(),
+  loadAllAnimeList()
+])
+
 const collection = computed(() => {
   return collections.value?.find(c => c.id === collectionId)
-})
-
-const { data: animeList, refresh: refreshAnimeList } = await useFetch<Anime[]>(
-  `${config.public.apiBase}/collections/${collectionId}/anime`,
-  {
-    default: () => []
-  }
-)
-
-const { data: allAnimeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
-  default: () => []
 })
 
 const showAddDialog = ref(false)
@@ -123,7 +149,7 @@ const addAnimeToCollection = async () => {
     ElMessage.success('添加成功')
     showAddDialog.value = false
     selectedAnimeId.value = null
-    await refreshAnimeList()
+    await loadAnimeList()
   } catch (error) {
     ElMessage.error('添加失败')
     console.error(error)

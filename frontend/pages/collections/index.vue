@@ -56,12 +56,21 @@ interface Collection {
 const config = useRuntimeConfig()
 const router = useRouter()
 
-const { data: collections, refresh } = await useFetch<Collection[]>(
-  `${config.public.apiBase}/collections`,
-  {
-    default: () => []
+const collections = ref<Collection[]>([])
+
+// 加载数据
+const loadCollections = async () => {
+  try {
+    const data = await $fetch<Collection[]>(`${config.public.apiBase}/collections`)
+    collections.value = data || []
+  } catch (error) {
+    console.error('加载收藏夹列表失败:', error)
+    collections.value = []
   }
-)
+}
+
+// 初始加载
+await loadCollections()
 
 const showCreateDialog = ref(false)
 const newCollection = ref({
@@ -89,7 +98,8 @@ const createCollection = async () => {
       name: '',
       description: null
     }
-    await refresh()
+    // 重新加载数据
+    await loadCollections()
   } catch (error) {
     ElMessage.error('创建失败')
     console.error(error)

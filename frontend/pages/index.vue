@@ -69,9 +69,21 @@ interface Anime {
 const config = useRuntimeConfig()
 const router = useRouter()
 
-const { data: animeList, refresh } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
-  default: () => []
-})
+const animeList = ref<Anime[]>([])
+
+// 加载数据
+const loadAnimeList = async () => {
+  try {
+    const data = await $fetch<Anime[]>(`${config.public.apiBase}/anime`)
+    animeList.value = data || []
+  } catch (error) {
+    console.error('加载番剧列表失败:', error)
+    animeList.value = []
+  }
+}
+
+// 初始加载
+await loadAnimeList()
 
 const showCreateDialog = ref(false)
 const newAnime = ref({
@@ -105,7 +117,8 @@ const createAnime = async () => {
       total_episodes: null,
       source_id: null
     }
-    await refresh()
+    // 重新加载数据
+    await loadAnimeList()
   } catch (error) {
     ElMessage.error('添加失败')
     console.error(error)
