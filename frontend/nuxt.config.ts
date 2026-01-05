@@ -1,4 +1,5 @@
 export default defineNuxtConfig({
+  ssr: false, // 禁用 SSR，避免重复请求
   devtools: { enabled: true },
   modules: ['@element-plus/nuxt'],
   css: ['element-plus/dist/index.css'],
