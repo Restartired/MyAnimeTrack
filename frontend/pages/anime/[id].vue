@@ -150,29 +150,40 @@ interface EpisodeReview {
 
 const route = useRoute()
 const config = useRuntimeConfig()
-const animeId = parseInt(route.params.id as string)
+const animeId = computed(() => parseInt(route.params.id as string))
 
 // 由于后端没有 GET /anime/{id}，我们需要从列表中找到对应的番剧
-const { data: animeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
+const { data: animeList, refresh: refreshAnimeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
   default: () => []
 })
 const anime = computed(() => {
-  return animeList.value?.find(a => a.id === animeId)
+  return animeList.value?.find(a => a.id === animeId.value)
 })
 
 const { data: episodes, refresh: refreshEpisodes, pending: episodesLoading } = await useFetch<Episode[]>(
-  `${config.public.apiBase}/anime/${animeId}/episodes`,
+  `${config.public.apiBase}/anime/${route.params.id}/episodes`,
   {
     default: () => []
   }
 )
 
 const { data: animeReviewData, refresh: refreshAnimeReview } = await useFetch<AnimeReview | null>(
-  `${config.public.apiBase}/anime/${animeId}/review`,
+  `${config.public.apiBase}/anime/${route.params.id}/review`,
   {
     default: () => null
   }
 )
+
+// 监听路由参数变化，重新获取数据
+watch(() => route.params.id, async (newId) => {
+  if (newId) {
+    await Promise.all([
+      refreshEpisodes(),
+      refreshAnimeReview(),
+      refreshAnimeList()
+    ])
+  }
+})
 
 const animeReview = ref<AnimeReview>({
   score: undefined,
@@ -216,7 +227,7 @@ const createEpisode = async () => {
   }
 
   try {
-    await $fetch(`${config.public.apiBase}/anime/${animeId}/episodes`, {
+    await $fetch(`${config.public.apiBase}/anime/${animeId.value}/episodes`, {
       method: 'POST',
       body: {
         episode_code: newEpisode.value.episode_code,
@@ -246,7 +257,7 @@ const openEpisodeReview = async (episode: Episode) => {
   currentEpisodeCode.value = episode.episode_code
   try {
     const reviewData = await $fetch<EpisodeReview | null>(
-      `${config.public.apiBase}/anime/${animeId}/episodes/${episode.episode_code}/review`
+      `${config.public.apiBase}/anime/${animeId.value}/episodes/${episode.episode_code}/review`
     )
     episodeReview.value = reviewData ? {
       score: reviewData.score ?? undefined,
@@ -262,7 +273,7 @@ const openEpisodeReview = async (episode: Episode) => {
 
 const saveEpisodeReview = async () => {
   try {
-    await $fetch(`${config.public.apiBase}/anime/${animeId}/episodes/${currentEpisodeCode.value}/review`, {
+    await $fetch(`${config.public.apiBase}/anime/${animeId.value}/episodes/${currentEpisodeCode.value}/review`, {
       method: 'POST',
       body: {
         score: episodeReview.value.score,
@@ -279,7 +290,7 @@ const saveEpisodeReview = async () => {
 
 const saveAnimeReview = async () => {
   try {
-    await $fetch(`${config.public.apiBase}/anime/${animeId}/review`, {
+    await $fetch(`${config.public.apiBase}/anime/${animeId.value}/review`, {
       method: 'POST',
       body: {
         score: animeReview.value.score,
