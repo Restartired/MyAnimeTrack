@@ -86,7 +86,8 @@ const collectionId = parseInt(route.params.id as string)
 const { data: collections } = await useFetch<Collection[]>(
   `${config.public.apiBase}/collections`,
   {
-    default: () => []
+    default: () => [],
+    server: false // 只在客户端执行，避免重复请求
   }
 )
 const collection = computed(() => {
@@ -96,12 +97,14 @@ const collection = computed(() => {
 const { data: animeList, refresh: refreshAnimeList } = await useFetch<Anime[]>(
   `${config.public.apiBase}/collections/${collectionId}/anime`,
   {
-    default: () => []
+    default: () => [],
+    server: false // 只在客户端执行，避免重复请求
   }
 )
 
 const { data: allAnimeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
-  default: () => []
+  default: () => [],
+  server: false // 只在客户端执行，避免重复请求
 })
 
 const showAddDialog = ref(false)

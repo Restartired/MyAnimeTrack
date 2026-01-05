@@ -154,7 +154,8 @@ const animeId = parseInt(route.params.id as string)
 
 // 由于后端没有 GET /anime/{id}，我们需要从列表中找到对应的番剧
 const { data: animeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
-  default: () => []
+  default: () => [],
+  server: false // 只在客户端执行，避免重复请求
 })
 const anime = computed(() => {
   return animeList.value?.find(a => a.id === animeId)
@@ -163,14 +164,16 @@ const anime = computed(() => {
 const { data: episodes, refresh: refreshEpisodes, pending: episodesLoading } = await useFetch<Episode[]>(
   `${config.public.apiBase}/anime/${animeId}/episodes`,
   {
-    default: () => []
+    default: () => [],
+    server: false // 只在客户端执行，避免重复请求
   }
 )
 
 const { data: animeReviewData, refresh: refreshAnimeReview } = await useFetch<AnimeReview | null>(
   `${config.public.apiBase}/anime/${animeId}/review`,
   {
-    default: () => null
+    default: () => null,
+    server: false // 只在客户端执行，避免重复请求
   }
 )
 
