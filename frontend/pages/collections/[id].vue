@@ -15,7 +15,7 @@
         <el-button type="primary" @click="showAddDialog = true">添加番剧到收藏夹</el-button>
       </div>
 
-      <el-row :gutter="20">
+      <el-row :gutter="20" v-if="animeList && animeList.length > 0">
         <el-col :span="6" v-for="anime in animeList" :key="anime.id" style="margin-bottom: 20px">
           <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer">
             <template #header>
@@ -29,6 +29,7 @@
           </el-card>
         </el-col>
       </el-row>
+      <el-empty v-else description="暂无番剧" />
     </el-card>
 
     <el-dialog v-model="showAddDialog" title="添加番剧到收藏夹" width="500px">
@@ -83,17 +84,25 @@ const collectionId = parseInt(route.params.id as string)
 
 // 获取所有收藏夹以查找当前收藏夹信息（由于没有单独的 GET /collections/{id}）
 const { data: collections } = await useFetch<Collection[]>(
-  `${config.public.apiBase}/collections`
+  `${config.public.apiBase}/collections`,
+  {
+    default: () => []
+  }
 )
 const collection = computed(() => {
   return collections.value?.find(c => c.id === collectionId)
 })
 
 const { data: animeList, refresh: refreshAnimeList } = await useFetch<Anime[]>(
-  `${config.public.apiBase}/collections/${collectionId}/anime`
+  `${config.public.apiBase}/collections/${collectionId}/anime`,
+  {
+    default: () => []
+  }
 )
 
-const { data: allAnimeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`)
+const { data: allAnimeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
+  default: () => []
+})
 
 const showAddDialog = ref(false)
 const selectedAnimeId = ref<number | null>(null)

@@ -7,7 +7,7 @@
           <el-button type="primary" @click="showCreateDialog = true">添加番剧</el-button>
         </div>
       </template>
-      <el-row :gutter="20">
+      <el-row :gutter="20" v-if="animeList && animeList.length > 0">
         <el-col :span="6" v-for="anime in animeList" :key="anime.id" style="margin-bottom: 20px">
           <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer">
             <template #header>
@@ -21,6 +21,7 @@
           </el-card>
         </el-col>
       </el-row>
+      <el-empty v-else description="暂无番剧" />
     </el-card>
 
     <el-dialog v-model="showCreateDialog" title="添加番剧" width="500px">
@@ -68,7 +69,9 @@ interface Anime {
 const config = useRuntimeConfig()
 const router = useRouter()
 
-const { data: animeList, refresh } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`)
+const { data: animeList, refresh } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
+  default: () => []
+})
 
 const showCreateDialog = ref(false)
 const newAnime = ref({

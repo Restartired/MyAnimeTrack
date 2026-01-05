@@ -40,7 +40,7 @@
           <el-button type="primary" @click="showEpisodeDialog = true">添加剧集</el-button>
         </div>
       </template>
-      <el-table :data="episodes" style="width: 100%">
+      <el-table :data="episodes || []" style="width: 100%" v-loading="episodesLoading">
         <el-table-column prop="episode_code" label="剧集代码" width="120" />
         <el-table-column prop="episode_type" label="类型" width="100" />
         <el-table-column prop="display_order" label="播放顺序" width="100" />
@@ -52,6 +52,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-empty v-if="episodes && episodes.length === 0" description="暂无剧集" />
     </el-card>
 
     <el-dialog v-model="showEpisodeDialog" title="添加剧集" width="500px">
@@ -136,14 +137,14 @@ interface Episode {
 }
 
 interface AnimeReview {
-  score: number | null
-  comment: string | null
+  score?: number
+  comment?: string
   reviewed_at?: string
 }
 
 interface EpisodeReview {
-  score: number | null
-  comment: string | null
+  score?: number
+  comment?: string
   reviewed_at?: string
 }
 
@@ -152,27 +153,43 @@ const config = useRuntimeConfig()
 const animeId = parseInt(route.params.id as string)
 
 // 由于后端没有 GET /anime/{id}，我们需要从列表中找到对应的番剧
-const { data: animeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`)
+const { data: animeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
+  default: () => []
+})
 const anime = computed(() => {
   return animeList.value?.find(a => a.id === animeId)
 })
 
-const { data: episodes, refresh: refreshEpisodes } = await useFetch<Episode[]>(
-  `${config.public.apiBase}/anime/${animeId}/episodes`
+const { data: episodes, refresh: refreshEpisodes, pending: episodesLoading } = await useFetch<Episode[]>(
+  `${config.public.apiBase}/anime/${animeId}/episodes`,
+  {
+    default: () => []
+  }
 )
 
-const { data: animeReviewData, refresh: refreshAnimeReview } = await useFetch<AnimeReview>(
-  `${config.public.apiBase}/anime/${animeId}/review`
+const { data: animeReviewData, refresh: refreshAnimeReview } = await useFetch<AnimeReview | null>(
+  `${config.public.apiBase}/anime/${animeId}/review`,
+  {
+    default: () => null
+  }
 )
 
 const animeReview = ref<AnimeReview>({
-  score: null,
-  comment: null
+  score: undefined,
+  comment: undefined
 })
 
 watch(animeReviewData, (data) => {
   if (data) {
-    animeReview.value = { ...data }
+    animeReview.value = {
+      score: data.score ?? undefined,
+      comment: data.comment ?? undefined
+    }
+  } else {
+    animeReview.value = {
+      score: undefined,
+      comment: undefined
+    }
   }
 }, { immediate: true })
 
@@ -188,8 +205,8 @@ const newEpisode = ref({
 const showReviewDialog = ref(false)
 const currentEpisodeCode = ref('')
 const episodeReview = ref<EpisodeReview>({
-  score: null,
-  comment: null
+  score: undefined,
+  comment: undefined
 })
 
 const createEpisode = async () => {
@@ -231,10 +248,13 @@ const openEpisodeReview = async (episode: Episode) => {
     const reviewData = await $fetch<EpisodeReview | null>(
       `${config.public.apiBase}/anime/${animeId}/episodes/${episode.episode_code}/review`
     )
-    episodeReview.value = reviewData || { score: null, comment: null }
+    episodeReview.value = reviewData ? {
+      score: reviewData.score ?? undefined,
+      comment: reviewData.comment ?? undefined
+    } : { score: undefined, comment: undefined }
     showReviewDialog.value = true
   } catch (error) {
-    episodeReview.value = { score: null, comment: null }
+    episodeReview.value = { score: undefined, comment: undefined }
     showReviewDialog.value = true
     console.error(error)
   }

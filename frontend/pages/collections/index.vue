@@ -7,7 +7,7 @@
           <el-button type="primary" @click="showCreateDialog = true">创建收藏夹</el-button>
         </div>
       </template>
-      <el-table :data="collections" style="width: 100%">
+      <el-table :data="collections || []" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="description" label="描述" />
@@ -18,6 +18,7 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-empty v-if="collections && collections.length === 0" description="暂无收藏夹" />
     </el-card>
 
     <el-dialog v-model="showCreateDialog" title="创建收藏夹" width="500px">
@@ -56,7 +57,10 @@ const config = useRuntimeConfig()
 const router = useRouter()
 
 const { data: collections, refresh } = await useFetch<Collection[]>(
-  `${config.public.apiBase}/collections`
+  `${config.public.apiBase}/collections`,
+  {
+    default: () => []
+  }
 )
 
 const showCreateDialog = ref(false)
