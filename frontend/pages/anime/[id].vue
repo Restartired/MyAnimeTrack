@@ -52,7 +52,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="episodes && episodes.length === 0" description="暂无剧集" />
+      <el-empty v-if="episodes && episodes.length === 0 && !episodesLoading" description="暂无剧集" />
     </el-card>
 
     <el-dialog v-model="showEpisodeDialog" title="添加剧集" width="500px">
@@ -150,59 +150,71 @@ interface EpisodeReview {
 
 const route = useRoute()
 const config = useRuntimeConfig()
+
 const animeId = computed(() => parseInt(route.params.id as string))
 
-// 由于后端没有 GET /anime/{id}，我们需要从列表中找到对应的番剧
-const { data: animeList, refresh: refreshAnimeList } = await useFetch<Anime[]>(`${config.public.apiBase}/anime`, {
-  default: () => []
-})
+// 获取番剧列表
+const { data: animeList, refresh: refreshAnimeList } = await useFetch<Anime[]>(
+  `${config.public.apiBase}/anime`,
+  { default: () => [] }
+)
+
+// 查找当前番剧
 const anime = computed(() => {
   return animeList.value?.find(a => a.id === animeId.value)
 })
 
-const { data: episodes, refresh: refreshEpisodes, pending: episodesLoading } = await useFetch<Episode[]>(
-  `${config.public.apiBase}/anime/${route.params.id}/episodes`,
-  {
-    default: () => []
-  }
-)
+// 剧集列表
+const episodes = ref<Episode[]>([])
+const episodesLoading = ref(false)
 
-const { data: animeReviewData, refresh: refreshAnimeReview } = await useFetch<AnimeReview | null>(
-  `${config.public.apiBase}/anime/${route.params.id}/review`,
-  {
-    default: () => null
-  }
-)
-
-// 监听路由参数变化，重新获取数据
-watch(() => route.params.id, async (newId) => {
-  if (newId) {
-    await Promise.all([
-      refreshEpisodes(),
-      refreshAnimeReview(),
-      refreshAnimeList()
-    ])
-  }
-})
-
+// 番剧评价
 const animeReview = ref<AnimeReview>({
   score: undefined,
   comment: undefined
 })
 
-watch(animeReviewData, (data) => {
-  if (data) {
-    animeReview.value = {
-      score: data.score ?? undefined,
-      comment: data.comment ?? undefined
+// 加载数据函数
+const loadData = async () => {
+  const id = animeId.value
+  if (!id) return
+
+  episodesLoading.value = true
+  try {
+    // 加载剧集列表
+    const episodesData = await $fetch<Episode[]>(
+      `${config.public.apiBase}/anime/${id}/episodes`
+    )
+    episodes.value = episodesData || []
+
+    // 加载番剧评价
+    try {
+      const reviewData = await $fetch<AnimeReview | null>(
+        `${config.public.apiBase}/anime/${id}/review`
+      )
+      animeReview.value = reviewData ? {
+        score: reviewData.score ?? undefined,
+        comment: reviewData.comment ?? undefined
+      } : { score: undefined, comment: undefined }
+    } catch (e) {
+      animeReview.value = { score: undefined, comment: undefined }
     }
-  } else {
-    animeReview.value = {
-      score: undefined,
-      comment: undefined
-    }
+  } catch (error) {
+    console.error('加载数据失败:', error)
+    episodes.value = []
+  } finally {
+    episodesLoading.value = false
   }
-}, { immediate: true })
+}
+
+// 初始加载
+await loadData()
+
+// 监听路由参数变化
+watch(() => route.params.id, async () => {
+  await refreshAnimeList()
+  await loadData()
+})
 
 const showEpisodeDialog = ref(false)
 const newEpisode = ref({
@@ -246,7 +258,7 @@ const createEpisode = async () => {
       title: null,
       air_date: null
     }
-    await refreshEpisodes()
+    await loadData()
   } catch (error) {
     ElMessage.error('添加失败')
     console.error(error)
@@ -298,7 +310,7 @@ const saveAnimeReview = async () => {
       }
     })
     ElMessage.success('保存成功')
-    await refreshAnimeReview()
+    await loadData()
   } catch (error) {
     ElMessage.error('保存失败')
     console.error(error)
