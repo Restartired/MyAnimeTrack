@@ -7,21 +7,26 @@
           <el-button type="primary" @click="showCreateDialog = true">添加番剧</el-button>
         </div>
       </template>
-      <el-row :gutter="20" v-if="animeList && animeList.length > 0">
-        <el-col :span="6" v-for="anime in animeList" :key="anime.id" style="margin-bottom: 20px">
-          <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer">
-            <template #header>
-              <div style="font-weight: bold; font-size: 16px">{{ anime.title }}</div>
-            </template>
-            <div>
-              <div v-if="anime.start_date">开播日期: {{ anime.start_date }}</div>
-              <div v-if="anime.total_episodes">总集数: {{ anime.total_episodes }}</div>
-              <div v-if="anime.source_id">来源ID: {{ anime.source_id }}</div>
-            </div>
-          </el-card>
-        </el-col>
-      </el-row>
-      <el-empty v-else description="暂无番剧" />
+      <div v-loading="loading">
+        <el-row :gutter="20" v-if="!loading && animeList && animeList.length > 0">
+          <el-col :span="6" v-for="anime in animeList" :key="anime.id" style="margin-bottom: 20px">
+            <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer">
+              <template #header>
+                <div style="font-weight: bold; font-size: 16px">{{ anime.title }}</div>
+              </template>
+              <div>
+                <div v-if="anime.start_date">开播日期: {{ anime.start_date }}</div>
+                <div v-if="anime.total_episodes">总集数: {{ anime.total_episodes }}</div>
+                <div v-if="anime.source_id">来源ID: {{ anime.source_id }}</div>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+        <el-empty v-if="!loading && (!animeList || animeList.length === 0)" description="暂无番剧" />
+        <div v-if="error" style="text-align: center; padding: 20px; color: #f56c6c;">
+          加载失败，请刷新页面重试
+        </div>
+      </div>
     </el-card>
 
     <el-dialog v-model="showCreateDialog" title="添加番剧" width="500px">
@@ -70,15 +75,23 @@ const config = useRuntimeConfig()
 const router = useRouter()
 
 const animeList = ref<Anime[]>([])
+const loading = ref(true)
+const error = ref(false)
 
 // 加载数据
 const loadAnimeList = async () => {
+  loading.value = true
+  error.value = false
   try {
     const data = await $fetch<Anime[]>(`${config.public.apiBase}/anime`)
     animeList.value = data || []
-  } catch (error) {
-    console.error('加载番剧列表失败:', error)
+  } catch (err) {
+    console.error('加载番剧列表失败:', err)
+    error.value = true
     animeList.value = []
+    ElMessage.error('加载番剧列表失败，请检查网络连接')
+  } finally {
+    loading.value = false
   }
 }
 
