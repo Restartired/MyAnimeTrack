@@ -1,24 +1,34 @@
 <template>
   <div v-if="anime" v-loading="pending">
-    <el-card>
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <h2>{{ anime.title }}</h2>
-          <div style="display: flex; gap: 10px;">
-            <el-button type="primary" @click="showAddToCollectionDialog = true">加入收藏夹</el-button>
-            <el-button type="danger" @click="deleteAnime">删除番剧</el-button>
+    <div style="position: relative;">
+      <!-- Banner/Header with Image if available -->
+      <el-card>
+        <div style="display: flex;">
+          <div v-if="anime.cover_image_url" style="margin-right: 20px;">
+            <img :src="anime.cover_image_url"
+              style="width: 200px; border-radius: 4px; box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);" />
+          </div>
+          <div style="flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+              <h2 style="margin-top: 0;">{{ anime.title }}</h2>
+              <div style="display: flex; gap: 10px;">
+                <el-button type="primary" @click="showAddToCollectionDialog = true">加入收藏夹</el-button>
+                <el-button type="danger" @click="deleteAnime">删除番剧</el-button>
+              </div>
+            </div>
+
+            <div style="margin-bottom: 20px; font-size: 14px; color: #555;">
+              <div v-if="anime.start_date" style="margin-bottom: 5px;">开播日期: {{ anime.start_date }}</div>
+              <div v-if="anime.total_episodes" style="margin-bottom: 5px;">总集数: {{ anime.total_episodes }}</div>
+              <div v-if="anime.source_id" style="margin-bottom: 5px;">来源ID: {{ anime.source_id }}</div>
+              <div v-if="anime.created_at" style="color: #999; font-size: 13px; margin-top: 10px;">
+                上传时间: {{ formatDate(anime.created_at) }}
+              </div>
+            </div>
           </div>
         </div>
-      </template>
-      <div style="margin-bottom: 20px">
-        <div v-if="anime.start_date">开播日期: {{ anime.start_date }}</div>
-        <div v-if="anime.total_episodes">总集数: {{ anime.total_episodes }}</div>
-        <div v-if="anime.source_id">来源ID: {{ anime.source_id }}</div>
-        <div v-if="anime.created_at" style="color: #666; font-size: 14px; margin-top: 5px;">
-          上传时间: {{ formatDate(anime.created_at) }}
-        </div>
-      </div>
-    </el-card>
+      </el-card>
+    </div>
 
     <el-card style="margin-top: 20px">
       <template #header>
@@ -40,10 +50,20 @@
     <el-card style="margin-top: 20px">
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
-          <div style="display: flex; gap: 20px; align-items: center;">
-            <span>剧集列表</span>
+          <div style="display: flex; gap: 15px; align-items: center;">
+            <span style="font-weight: bold;">剧集列表</span>
+
+            <!-- Filter -->
+            <el-select v-model="episodeFilter" placeholder="类型" size="small" style="width: 100px;">
+              <el-option label="全部" value="all" />
+              <el-option label="正片" value="main" />
+              <el-option label="SP" value="sp" />
+              <el-option label="OVA" value="ova" />
+            </el-select>
+
+            <!-- Sort -->
             <el-select v-model="episodeSortBy" placeholder="排序" size="small" style="width: 120px;">
-              <el-option label="默认(播放顺序)" value="default" />
+              <el-option label="默认" value="default" />
               <el-option label="播出日期" value="air_date" />
               <el-option label="标题" value="title" />
             </el-select>
@@ -51,13 +71,19 @@
           <el-button type="primary" @click="showEpisodeDialog = true">添加剧集</el-button>
         </div>
       </template>
-      <el-table :data="sortedEpisodes || []" style="width: 100%" v-loading="episodesLoading">
-        <el-table-column prop="episode_code" label="剧集代码" width="120" />
-        <el-table-column prop="episode_type" label="类型" width="100" />
-        <el-table-column prop="display_order" label="播放顺序" width="100" />
+      <el-table :data="filteredEpisodes || []" style="width: 100%" v-loading="episodesLoading">
+        <el-table-column prop="episode_code" label="代码" width="100" />
+        <el-table-column prop="episode_type" label="类型" width="80" />
+        <el-table-column prop="display_order" label="顺序" width="80" />
         <el-table-column prop="title" label="标题" />
         <el-table-column prop="air_date" label="播出日期" width="120" />
-        <el-table-column label="操作" width="180">
+        <el-table-column label="评价" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.score" type="success" size="small">{{ row.score }}分</el-tag>
+            <span v-else style="color: #bbb; font-size: 12px;">未评分</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button size="small" @click="openEpisodeReview(row)">评价</el-button>
             <el-button size="small" type="danger" @click="deleteEpisode(row)">删除</el-button>
@@ -84,7 +110,6 @@
     </el-dialog>
 
     <el-dialog v-model="showEpisodeDialog" title="添加剧集" width="500px">
-      <!-- (Episode Dialog Content) -->
       <el-form :model="newEpisode" label-width="120px">
         <el-form-item label="剧集代码" required>
           <el-input v-model="newEpisode.episode_code" placeholder="如: E01, OVA1, SP01" />
@@ -144,6 +169,7 @@ interface Anime {
   total_episodes: number | null
   created_at: string
   source_id: string | null
+  cover_image_url: string | null
 }
 
 interface Episode {
@@ -152,6 +178,7 @@ interface Episode {
   display_order: number
   title: string | null
   air_date: string | null
+  score?: number
 }
 
 interface AnimeReview {
@@ -185,14 +212,21 @@ const { data: anime, pending } = await useAsyncData<Anime>(
 const episodes = ref<Episode[]>([])
 const episodesLoading = ref(false)
 const episodeSortBy = ref('default') // default (backend order), air_date, title
+const episodeFilter = ref('all') // all, main, sp, ova
 
-const sortedEpisodes = computed(() => {
+const filteredEpisodes = computed(() => {
   if (!episodes.value) return []
-  const list = [...episodes.value]
+  let list = [...episodes.value]
 
+  // Filter
+  if (episodeFilter.value !== 'all') {
+    list = list.filter(e => e.episode_type === episodeFilter.value)
+  }
+
+  // Sort
   switch (episodeSortBy.value) {
     case 'default':
-      // Backend order (now air_date, display_order)
+      // Backend order is prioritized (Main first, then order/date)
       return list
     case 'air_date':
       return list.sort((a, b) => {

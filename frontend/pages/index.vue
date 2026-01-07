@@ -27,15 +27,35 @@
         <div v-if="viewMode === 'card'">
           <el-row :gutter="20" v-if="!pending && sortedAnimeList && sortedAnimeList.length > 0">
             <el-col :span="6" v-for="anime in sortedAnimeList" :key="anime.id" style="margin-bottom: 20px">
-              <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer">
-                <template #header>
-                  <div style="font-weight: bold; font-size: 16px">{{ anime.title }}</div>
-                </template>
-                <div>
-                  <div v-if="anime.start_date">开播日期: {{ anime.start_date }}</div>
-                  <div v-if="anime.total_episodes">总集数: {{ anime.total_episodes }}</div>
-                  <div v-if="anime.created_at" style="color: #999; font-size: 12px; margin-top: 5px;">
-                    上传于: {{ formatDate(anime.created_at) }}
+              <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer; padding: 0px;"
+                :body-style="{ padding: '0px' }">
+                <div style="position: relative; height: 260px; overflow: hidden;">
+                  <img v-if="anime.cover_image_url" :src="anime.cover_image_url"
+                    style="width: 100%; height: 100%; object-fit: cover;" />
+                  <div v-else
+                    style="width: 100%; height: 100%; background: #f0f2f5; display: flex; align-items: center; justify-content: center; color: #909399;">
+                    暂无封面
+                  </div>
+
+                  <!-- Title overlay at bottom -->
+                  <div
+                    style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.8)); padding: 20px 10px 10px 10px;">
+                    <div
+                      style="color: white; font-weight: bold; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                      {{ anime.title }}
+                    </div>
+                  </div>
+                </div>
+
+                <div style="padding: 14px;">
+                  <div style="font-size: 13px; color: #606266; margin-bottom: 5px;">
+                    <span v-if="anime.start_date">{{ anime.start_date }} 开播</span>
+                    <span v-else>未知日期</span>
+                  </div>
+                  <div
+                    style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #999;">
+                    <span>{{ anime.total_episodes ? `${anime.total_episodes} 集` : '集数未知' }}</span>
+                    <span>{{ formatDateShort(anime.created_at) }}</span>
                   </div>
                 </div>
               </el-card>
@@ -48,6 +68,16 @@
         <div v-else>
           <el-table v-if="!pending && sortedAnimeList && sortedAnimeList.length > 0" :data="sortedAnimeList"
             style="width: 100%" @row-click="goToAnimeByRow">
+            <el-table-column label="封面" width="80">
+              <template #default="{ row }">
+                <img v-if="row.cover_image_url" :src="row.cover_image_url"
+                  style="width: 50px; height: 70px; object-fit: cover; border-radius: 4px;" />
+                <div v-else
+                  style="width: 50px; height: 70px; background: #eaecf1; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #909399;">
+                  无图
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="title" label="标题" />
             <el-table-column prop="start_date" label="开播日期" width="120" />
             <el-table-column prop="total_episodes" label="总集数" width="100" />
@@ -78,6 +108,9 @@
           <el-form :model="newAnime" label-width="100px" style="margin-top: 20px">
             <el-form-item label="标题" required>
               <el-input v-model="newAnime.title" placeholder="请输入番剧标题" />
+            </el-form-item>
+            <el-form-item label="封面图片">
+              <el-input v-model="newAnime.cover_image_url" placeholder="图片 URL" />
             </el-form-item>
             <el-form-item label="开播日期">
               <el-date-picker v-model="newAnime.start_date" type="date" placeholder="选择日期" format="YYYY-MM-DD"
@@ -157,6 +190,7 @@ interface Anime {
   total_episodes: number | null
   created_at: string
   source_id: string | null
+  cover_image_url: string | null
 }
 
 interface BangumiSearchResult {
@@ -188,7 +222,6 @@ const sortedAnimeList = computed(() => {
 
   switch (sortBy.value) {
     case 'newest':
-      // Backend already sends sorted by created_at DESC as default usually, but ensuring here
       return list // Default from backend is created_at DESC
     case 'oldest':
       return list.reverse()
@@ -215,7 +248,8 @@ const newAnime = ref({
   title: '',
   start_date: null as string | null,
   total_episodes: null as number | null,
-  source_id: null as string | null
+  source_id: null as string | null,
+  cover_image_url: null as string | null
 })
 
 const searchBangumi = async () => {
@@ -260,7 +294,8 @@ const selectSearchResult = (result: BangumiSearchResult) => {
     title: result.title,
     start_date: result.start_date,
     total_episodes: result.total_episodes,
-    source_id: result.source_id
+    source_id: result.source_id,
+    cover_image_url: result.cover_image
   }
   activeTab.value = 'manual'
   ElMessage.success('已填充数据，请确认后点击确定')
@@ -279,7 +314,8 @@ const createAnime = async () => {
         title: newAnime.value.title,
         start_date: newAnime.value.start_date,
         total_episodes: newAnime.value.total_episodes,
-        source_id: newAnime.value.source_id
+        source_id: newAnime.value.source_id,
+        cover_image_url: newAnime.value.cover_image_url
       }
     })
     ElMessage.success('添加成功')
@@ -288,7 +324,8 @@ const createAnime = async () => {
       title: '',
       start_date: null,
       total_episodes: null,
-      source_id: null
+      source_id: null,
+      cover_image_url: null
     }
     searchQuery.value = ''
     searchResults.value = []
@@ -344,5 +381,14 @@ const formatDate = (dateStr: string) => {
   const minutes = String(date.getMinutes()).padStart(2, '0')
   const seconds = String(date.getSeconds()).padStart(2, '0')
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+}
+
+const formatDateShort = (dateStr: string) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 </script>

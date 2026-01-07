@@ -33,14 +33,15 @@ def create_anime(anime: AnimeCreate):
 
     try:
         cur.execute("""
-            INSERT INTO Anime (title, start_date, total_episodes, source_id)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id, title, start_date, total_episodes, created_at, source_id
+            INSERT INTO Anime (title, start_date, total_episodes, source_id, cover_image_url)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, title, start_date, total_episodes, created_at, source_id, cover_image_url
         """, (
             anime.title,
             anime.start_date,
             anime.total_episodes,
-            anime.source_id
+            anime.source_id,
+            anime.cover_image_url
         ))
         
         row = cur.fetchone()
@@ -50,6 +51,31 @@ def create_anime(anime: AnimeCreate):
         if anime.source_id and anime.source_id.startswith("BGM-"):
             try:
                 bgm_id = anime.source_id.split("-")[1]
+                
+                # Fetch Subject Detail for Cover Image if not provided
+                if not anime.cover_image_url:
+                    try:
+                        subject_resp = requests.get(
+                            f"https://api.bgm.tv/v0/subjects/{bgm_id}",
+                            headers={"User-Agent": "MyAnimeTrack/1.0"},
+                            timeout=5
+                        )
+                        if subject_resp.status_code == 200:
+                            subj_data = subject_resp.json()
+                            images = subj_data.get("images", {})
+                            cover_url = images.get("large") or images.get("common") or images.get("medium")
+                            
+                            if cover_url:
+                                cur.execute("""
+                                    UPDATE Anime SET cover_image_url = %s WHERE id = %s
+                                """, (cover_url, new_anime_id))
+                                # Update row data for return
+                                row = list(row)
+                                row[6] = cover_url
+                                row = tuple(row)
+                    except Exception as e:
+                        print(f"Failed to fetch cover image: {e}")
+
                 # Fetch episodes from Bangumi
                 ep_response = requests.get(
                     f"https://api.bgm.tv/v0/episodes",
@@ -102,7 +128,6 @@ def create_anime(anime: AnimeCreate):
                         """, episodes_to_insert)
             except Exception as e:
                 print(f"Failed to sync episodes from Bangumi: {e}")
-                # Don't fail the anime creation if sync fails
                 pass
 
         conn.commit()
@@ -120,6 +145,7 @@ def create_anime(anime: AnimeCreate):
         "total_episodes": row[3],
         "created_at": row[4],
         "source_id": row[5],
+        "cover_image_url": row[6]
     }
 
 
@@ -169,7 +195,7 @@ def get_anime():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT id, title, start_date, total_episodes, created_at, source_id
+        SELECT id, title, start_date, total_episodes, created_at, source_id, cover_image_url
         FROM Anime
         ORDER BY created_at DESC
     """)
@@ -186,6 +212,7 @@ def get_anime():
             "total_episodes": r[3],
             "created_at": r[4],
             "source_id": r[5],
+            "cover_image_url": r[6],
         }
         for r in rows
     ]
@@ -235,7 +262,10 @@ def get_episodes(anime_id: int):
         SELECT episode_code, episode_type, display_order, title, air_date
         FROM Episode
         WHERE anime_id = %s
-        ORDER BY air_date NULLS LAST, display_order
+        ORDER BY 
+            CASE WHEN episode_type = 'main' THEN 0 ELSE 1 END,
+            display_order,
+            air_date NULLS LAST
     """, (anime_id,))
 
     rows = cur.fetchall()
@@ -569,7 +599,7 @@ def get_collection_anime(collection_id: int):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT a.id, a.title, a.start_date, a.total_episodes, a.created_at, a.source_id
+        SELECT a.id, a.title, a.start_date, a.total_episodes, a.created_at, a.source_id, a.cover_image_url
         FROM Anime a
         JOIN CollectionAnime ca ON a.id = ca.anime_id
         WHERE ca.collection_id = %s
@@ -588,6 +618,7 @@ def get_collection_anime(collection_id: int):
             "total_episodes": r[3],
             "created_at": r[4],
             "source_id": r[5],
+            "cover_image_url": r[6],
         }
         for r in rows
     ]

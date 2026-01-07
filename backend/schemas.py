@@ -8,6 +8,7 @@ class AnimeCreate(BaseModel):
     start_date: Optional[date] = None
     total_episodes: Optional[int] = None
     source_id: Optional[str] = None
+    cover_image_url: Optional[str] = None
 
 
 class AnimeOut(BaseModel):
@@ -17,6 +18,7 @@ class AnimeOut(BaseModel):
     total_episodes: Optional[int]
     created_at: datetime
     source_id: Optional[str]
+    cover_image_url: Optional[str]
 
 
 class EpisodeCreate(BaseModel):
