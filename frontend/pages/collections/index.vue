@@ -15,6 +15,7 @@
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button size="small" @click="goToCollection(row.id)">查看</el-button>
+            <el-button size="small" type="danger" @click="deleteCollection(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -44,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Collection {
   id: number
@@ -108,5 +109,32 @@ const createCollection = async () => {
 
 const goToCollection = (id: number) => {
   router.push(`/collections/${id}`)
+}
+
+const deleteCollection = (collection: Collection) => {
+  ElMessageBox.confirm(
+    `确定要删除收藏夹 "${collection.name}" 吗？`,
+    '提示',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  )
+    .then(async () => {
+      try {
+        await $fetch(`${config.public.apiBase}/collections/${collection.id}`, {
+          method: 'DELETE',
+        })
+        ElMessage.success('删除成功')
+        await loadCollections()
+      } catch (error) {
+        ElMessage.error('删除失败')
+        console.error(error)
+      }
+    })
+    .catch(() => {
+      // 取消
+    })
 }
 </script>

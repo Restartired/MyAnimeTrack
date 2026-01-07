@@ -2,7 +2,10 @@
   <div v-if="anime">
     <el-card>
       <template #header>
-        <h2>{{ anime.title }}</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <h2>{{ anime.title }}</h2>
+          <el-button type="danger" @click="deleteAnime">删除番剧</el-button>
+        </div>
       </template>
       <div style="margin-bottom: 20px">
         <div v-if="anime.start_date">开播日期: {{ anime.start_date }}</div>
@@ -46,9 +49,10 @@
         <el-table-column prop="display_order" label="播放顺序" width="100" />
         <el-table-column prop="title" label="标题" />
         <el-table-column prop="air_date" label="播出日期" width="120" />
-        <el-table-column label="操作" width="150">
+        <el-table-column label="操作" width="180">
           <template #default="{ row }">
             <el-button size="small" @click="openEpisodeReview(row)">评价</el-button>
+            <el-button size="small" type="danger" @click="deleteEpisode(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -117,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Anime {
   id: number
@@ -149,6 +153,7 @@ interface EpisodeReview {
 }
 
 const route = useRoute()
+const router = useRouter()
 const config = useRuntimeConfig()
 
 const animeId = computed(() => parseInt(route.params.id as string))
@@ -325,5 +330,59 @@ const saveAnimeReview = async () => {
     ElMessage.error('保存失败')
     console.error(error)
   }
+}
+
+const deleteAnime = () => {
+  ElMessageBox.confirm(
+    '确定要删除这个番剧吗？删除后将无法恢复，包括相关的剧集和评价记录。',
+    '警告',
+    {
+      confirmButtonText: '确定删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  )
+    .then(async () => {
+      try {
+        await $fetch(`${config.public.apiBase}/anime/${animeId.value}`, {
+          method: 'DELETE',
+        })
+        ElMessage.success('番剧已删除')
+        router.push('/')
+      } catch (error) {
+        ElMessage.error('删除失败')
+        console.error(error)
+      }
+    })
+    .catch(() => {
+      // 取消删除
+    })
+}
+
+const deleteEpisode = (episode: Episode) => {
+  ElMessageBox.confirm(
+    `确定要删除剧集 ${episode.episode_code} 吗？`,
+    '提示',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  )
+    .then(async () => {
+      try {
+        await $fetch(`${config.public.apiBase}/anime/${animeId.value}/episodes/${episode.episode_code}`, {
+          method: 'DELETE',
+        })
+        ElMessage.success('剧集已删除')
+        await loadData()
+      } catch (error) {
+        ElMessage.error('删除失败')
+        console.error(error)
+      }
+    })
+    .catch(() => {
+      // 取消
+    })
 }
 </script>
