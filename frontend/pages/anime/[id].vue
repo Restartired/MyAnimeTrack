@@ -40,11 +40,18 @@
     <el-card style="margin-top: 20px">
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
-          <span>剧集列表</span>
+          <div style="display: flex; gap: 20px; align-items: center;">
+            <span>剧集列表</span>
+            <el-select v-model="episodeSortBy" placeholder="排序" size="small" style="width: 120px;">
+              <el-option label="默认(播放顺序)" value="default" />
+              <el-option label="播出日期" value="air_date" />
+              <el-option label="标题" value="title" />
+            </el-select>
+          </div>
           <el-button type="primary" @click="showEpisodeDialog = true">添加剧集</el-button>
         </div>
       </template>
-      <el-table :data="episodes || []" style="width: 100%" v-loading="episodesLoading">
+      <el-table :data="sortedEpisodes || []" style="width: 100%" v-loading="episodesLoading">
         <el-table-column prop="episode_code" label="剧集代码" width="120" />
         <el-table-column prop="episode_type" label="类型" width="100" />
         <el-table-column prop="display_order" label="播放顺序" width="100" />
@@ -77,6 +84,7 @@
     </el-dialog>
 
     <el-dialog v-model="showEpisodeDialog" title="添加剧集" width="500px">
+      <!-- (Episode Dialog Content) -->
       <el-form :model="newEpisode" label-width="120px">
         <el-form-item label="剧集代码" required>
           <el-input v-model="newEpisode.episode_code" placeholder="如: E01, OVA1, SP01" />
@@ -176,6 +184,31 @@ const { data: anime, pending } = await useAsyncData<Anime>(
 
 const episodes = ref<Episode[]>([])
 const episodesLoading = ref(false)
+const episodeSortBy = ref('default') // default (backend order), air_date, title
+
+const sortedEpisodes = computed(() => {
+  if (!episodes.value) return []
+  const list = [...episodes.value]
+
+  switch (episodeSortBy.value) {
+    case 'default':
+      // Backend order (now air_date, display_order)
+      return list
+    case 'air_date':
+      return list.sort((a, b) => {
+        if (!a.air_date) return 1
+        if (!b.air_date) return -1
+        return a.air_date.localeCompare(b.air_date)
+      })
+    case 'title':
+      return list.sort((a, b) => {
+        const titleA = a.title || ''
+        const titleB = b.title || ''
+        return titleA.localeCompare(titleB, 'zh')
+      })
+  }
+  return list
+})
 
 const animeReview = ref<AnimeReview>({
   score: undefined,

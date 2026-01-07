@@ -4,13 +4,12 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>收藏夹列表</span>
-          <el-button type="primary" @click="showCreateDialog = true">创建收藏夹</el-button>
+          <el-button type="primary" @click="openCreateDialog">创建收藏夹</el-button>
         </div>
       </template>
       <div v-loading="pending">
         <el-table v-if="!pending && collections && collections.length > 0" :data="collections" style="width: 100%"
           @row-click="goToCollectionByRow" row-class-name="clickable-row">
-          <el-table-column prop="id" label="ID" width="80" />
           <el-table-column prop="name" label="名称" />
           <el-table-column prop="description" label="描述" />
           <el-table-column label="创建时间" width="200">
@@ -18,8 +17,9 @@
               {{ formatDate(row.created_at) }}
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="120">
+          <el-table-column label="操作" width="180">
             <template #default="{ row }">
+              <el-button size="small" @click.stop="openEditDialog(row)">编辑</el-button>
               <el-button type="danger" size="small" @click.stop="deleteCollection(row)">删除</el-button>
             </template>
           </el-table-column>
@@ -28,18 +28,19 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="showCreateDialog" title="创建收藏夹" width="500px">
-      <el-form :model="newCollection" label-width="100px">
+    <!-- Create/Edit Dialog -->
+    <el-dialog v-model="showDialog" :title="isEditMode ? '编辑收藏夹' : '创建收藏夹'" width="500px">
+      <el-form :model="collectionForm" label-width="100px">
         <el-form-item label="名称" required>
-          <el-input v-model="newCollection.name" placeholder="请输入收藏夹名称" />
+          <el-input v-model="collectionForm.name" placeholder="请输入收藏夹名称" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="newCollection.description" type="textarea" :rows="4" placeholder="请输入描述（可选）" />
+          <el-input v-model="collectionForm.description" type="textarea" :rows="4" placeholder="请输入描述（可选）" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" @click="createCollection">确定</el-button>
+        <el-button @click="showDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitCollection">确定</el-button>
       </template>
     </el-dialog>
   </div>
@@ -69,35 +70,67 @@ const { data: collections, pending, refresh } = await useAsyncData<Collection[]>
   () => $fetch(`${config.public.apiBase}/collections`)
 )
 
-const showCreateDialog = ref(false)
-const newCollection = ref({
+const showDialog = ref(false)
+const isEditMode = ref(false)
+const editingId = ref<number | null>(null)
+const collectionForm = ref({
   name: '',
   description: null as string | null
 })
 
-const createCollection = async () => {
-  if (!newCollection.value.name.trim()) {
+const openCreateDialog = () => {
+  isEditMode.value = false
+  editingId.value = null
+  collectionForm.value = {
+    name: '',
+    description: null
+  }
+  showDialog.value = true
+}
+
+const openEditDialog = (row: Collection) => {
+  isEditMode.value = true
+  editingId.value = row.id
+  collectionForm.value = {
+    name: row.name,
+    description: row.description
+  }
+  showDialog.value = true
+}
+
+const submitCollection = async () => {
+  if (!collectionForm.value.name.trim()) {
     ElMessage.warning('请输入收藏夹名称')
     return
   }
 
   try {
-    await $fetch(`${config.public.apiBase}/collections`, {
-      method: 'POST',
-      body: {
-        name: newCollection.value.name,
-        description: newCollection.value.description
-      }
-    })
-    ElMessage.success('创建成功')
-    showCreateDialog.value = false
-    newCollection.value = {
-      name: '',
-      description: null
+    if (isEditMode.value && editingId.value) {
+      // Edit
+      await $fetch(`${config.public.apiBase}/collections/${editingId.value}`, {
+        method: 'PUT',
+        body: {
+          name: collectionForm.value.name,
+          description: collectionForm.value.description
+        }
+      })
+      ElMessage.success('更新成功')
+    } else {
+      // Create
+      await $fetch(`${config.public.apiBase}/collections`, {
+        method: 'POST',
+        body: {
+          name: collectionForm.value.name,
+          description: collectionForm.value.description
+        }
+      })
+      ElMessage.success('创建成功')
     }
+
+    showDialog.value = false
     refresh()
   } catch (error) {
-    ElMessage.error('创建失败')
+    ElMessage.error(isEditMode.value ? '更新失败' : '创建失败')
     console.error(error)
   }
 }

@@ -71,12 +71,13 @@ def create_anime(anime: AnimeCreate):
                         ep_type_val = ep.get("type")
                         if ep_type_val == 0:
                             ep_type = "main"
-                            ep_code = f"E{ep.get('sort'):02d}" # Format as E01, E02...
-                            # Handle case where sort might not be convertible to int directly or other formats
+                            sort_val = ep.get('sort')
                             try:
-                                ep_code = f"E{int(ep.get('sort')):02d}"
+                                # Try to convert to int first if it's a number (even float like 1.0)
+                                ep_code = f"E{int(float(sort_val)):02d}"
                             except:
-                                ep_code = f"E{ep.get('sort')}"
+                                # Fallback if it's not a standard number
+                                ep_code = f"E{sort_val}"
                         elif ep_type_val == 1:
                             ep_type = "sp"
                             ep_code = f"SP{ep.get('sort')}"
@@ -234,7 +235,7 @@ def get_episodes(anime_id: int):
         SELECT episode_code, episode_type, display_order, title, air_date
         FROM Episode
         WHERE anime_id = %s
-        ORDER BY display_order
+        ORDER BY air_date NULLS LAST, display_order
     """, (anime_id,))
 
     rows = cur.fetchall()
@@ -435,6 +436,44 @@ def create_collection(collection: CollectionCreate):
     conn.commit()
     cur.close()
     conn.close()
+
+    return {
+        "id": row[0],
+        "name": row[1],
+        "description": row[2],
+        "created_at": row[3],
+    }
+
+
+# PUT /collections/{collection_id}（更新收藏夹）
+@app.put("/collections/{collection_id}", response_model=CollectionOut)
+def update_collection(collection_id: int, collection: CollectionCreate):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE Collection
+            SET name = %s, description = %s
+            WHERE id = %s
+            RETURNING id, name, description, created_at
+        """, (
+            collection.name,
+            collection.description,
+            collection_id
+        ))
+        
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Collection not found")
+            
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
 
     return {
         "id": row[0],

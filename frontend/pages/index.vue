@@ -4,12 +4,20 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>番剧列表</span>
-          <div style="display: flex; gap: 10px;">
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <el-select v-model="sortBy" placeholder="排序" size="small" style="width: 120px; margin-right: 10px;">
+              <el-option label="默认(上传时间)" value="newest" />
+              <el-option label="最早上传" value="oldest" />
+              <el-option label="开播日期" value="air_date" />
+              <el-option label="标题" value="title" />
+            </el-select>
+
             <el-radio-group v-model="viewMode" size="small">
-              <el-radio-button label="card">卡片视图</el-radio-button>
-              <el-radio-button label="list">列表视图</el-radio-button>
+              <el-radio-button value="card">卡片视图</el-radio-button>
+              <el-radio-button value="list">列表视图</el-radio-button>
             </el-radio-group>
-            <el-button type="primary" @click="showCreateDialog = true">添加番剧</el-button>
+
+            <el-button type="primary" size="small" @click="showCreateDialog = true">添加番剧</el-button>
           </div>
         </div>
       </template>
@@ -17,8 +25,8 @@
 
         <!-- 卡片视图 -->
         <div v-if="viewMode === 'card'">
-          <el-row :gutter="20" v-if="!pending && animeList && animeList.length > 0">
-            <el-col :span="6" v-for="anime in animeList" :key="anime.id" style="margin-bottom: 20px">
+          <el-row :gutter="20" v-if="!pending && sortedAnimeList && sortedAnimeList.length > 0">
+            <el-col :span="6" v-for="anime in sortedAnimeList" :key="anime.id" style="margin-bottom: 20px">
               <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer">
                 <template #header>
                   <div style="font-weight: bold; font-size: 16px">{{ anime.title }}</div>
@@ -38,8 +46,8 @@
 
         <!-- 列表视图 -->
         <div v-else>
-          <el-table v-if="!pending && animeList && animeList.length > 0" :data="animeList" style="width: 100%"
-            @row-click="goToAnimeByRow">
+          <el-table v-if="!pending && sortedAnimeList && sortedAnimeList.length > 0" :data="sortedAnimeList"
+            style="width: 100%" @row-click="goToAnimeByRow">
             <el-table-column prop="title" label="标题" />
             <el-table-column prop="start_date" label="开播日期" width="120" />
             <el-table-column prop="total_episodes" label="总集数" width="100" />
@@ -64,6 +72,7 @@
     </el-card>
 
     <el-dialog v-model="showCreateDialog" title="添加番剧" width="600px">
+      <!-- (Dialog content remains exact same) -->
       <el-tabs v-model="activeTab">
         <el-tab-pane label="手动输入" name="manual">
           <el-form :model="newAnime" label-width="100px" style="margin-top: 20px">
@@ -165,11 +174,35 @@ interface BangumiSearchResult {
 const config = useRuntimeConfig()
 const router = useRouter()
 const viewMode = ref('card')
+const sortBy = ref('newest') // newest, oldest, air_date, title
 
 const { data: animeList, pending, error, refresh } = await useAsyncData<Anime[]>(
   'anime-list',
   () => $fetch(`${config.public.apiBase}/anime`)
 )
+
+// Sorting Logic
+const sortedAnimeList = computed(() => {
+  if (!animeList.value) return []
+  const list = [...animeList.value]
+
+  switch (sortBy.value) {
+    case 'newest':
+      // Backend already sends sorted by created_at DESC as default usually, but ensuring here
+      return list // Default from backend is created_at DESC
+    case 'oldest':
+      return list.reverse()
+    case 'air_date':
+      return list.sort((a, b) => {
+        if (!a.start_date) return 1
+        if (!b.start_date) return -1
+        return a.start_date.localeCompare(b.start_date)
+      })
+    case 'title':
+      return list.sort((a, b) => a.title.localeCompare(b.title, 'zh'))
+  }
+  return list
+})
 
 const showCreateDialog = ref(false)
 const activeTab = ref('manual')
@@ -186,6 +219,7 @@ const newAnime = ref({
 })
 
 const searchBangumi = async () => {
+  // ... search logic
   if (!searchQuery.value.trim()) {
     ElMessage.warning('请输入搜索关键词')
     return
