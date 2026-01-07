@@ -220,7 +220,7 @@ const animeId = computed(() => parseInt(route.params.id as string))
 
 const { data: anime, pending, refresh: refreshAnime } = await useAsyncData<Anime>(
   `anime-${animeId.value}`,
-  () => $fetch<Anime>(`${config.public.apiBase}/anime`).then(list => list.find(a => a.id === animeId.value) as Anime)
+  () => $fetch<Anime[]>(`${config.public.apiBase}/anime`).then(list => list.find(a => a.id === animeId.value) as Anime)
 )
 
 const episodes = ref<Episode[]>([])
@@ -271,57 +271,9 @@ const loadEpData = async () => {
     // Fetch episodes
     const eps = await $fetch<Episode[]>(`${config.public.apiBase}/anime/${animeId.value}/episodes`)
 
-    // Fetch rating for EACH episode (Expensive but needed if not included in list initially. 
-    // Ideally backend shoukd return it. For now, relying on lazy loading might be better? 
-    // Actually user said "Fix episode rating". 
-    // Let's optimize: We previously fetched reviews individually.
-    // Let's keep fetching reviews on demand OR fix the issue where it doesn't update.
-    // The issue "不会更新" likely means when I save, I don't update local state.
-
-    // Let's populate score map.
-    // Since backend doesn't return score in EpisodeOut, we have to fetch it or rely on side-loading.
-    // For performance, I won't Loop 100 HTTP calls here. 
-    // I will trust the "review" logic to update the local state.
-    // BUT wait, previous logic didn't load scores into the list! 
-    // Ah, the Table Column used `row.score`. But `EpisodeOut` doesn't have `score`. 
-    // The user's code snippet implies they expect `row.score`.
-    // I should probably add `score` to `EpisodeOut` in backend to make this clean. 
-    // **However**, I didn't plan that in backend task.
-    // Let's check `get_episodes` in backend... it returns `EpisodeOut` which has `episode_code`, `type`, etc. NO SCORE.
-    // **I need to fetch scores for all episodes.**
-
-    // Workaround: I'll fetch reviews for all if efficient, or just fetch when visible?
-    // No, table needs it. 
-    // Better fix: Update Backend `get_episodes` to include `score` LEFT JOIN EpisodeReview.
-    // Since I already finished backend, I should try to do without if possible, but it's much better with.
-
-    // For now, I will fetch them individually in parallel for top 50? No that's bad.
-    // I'll make a quick backend patch if I can, OR just accept I missed it.
-    // User complained "Give episode rating, then it doesn't update".
-
-    // Let's assume I missed adding `score` to `EpisodeOut` in backend.
-    // I will try to fetch it for the current `currentEpisodeCode` specifically update it locally.
-
-    // Wait, if the column `row.score` is used, it must be populated.
-    // I will populate it by fetching reviews one by one? Extreme slow.
-    // I'll fetch reviews in a separate call? 
-    // Actually, let's just fetch the review when I click "evaluate"? No, the tag needs to show.
-
-    // I will check if I can quick-fix backend `get_episodes` to return score.
-    // Yes, I should.
     episodes.value = eps.map(e => ({ ...e, score: undefined }))
 
-    // Parallel fetch scores (Bad practice but quick fix for now without editing backend again yet)
-    // Actually, let's load review data.
-    // Since I cannot easily edit backend now (blocked by task constraints/steps remaining?), 
-    // I will try to fetch review logic. 
-    // If I can't, I'll just ensure update works.
-
-    // Let's do: Fetch all reviews logic is missing. 
-    // I'll iterate and fetch for now. It's local dev, delay is acceptable for 10-20 eps.
-    // For 100 eps it will die.
-    // Okay, I'll implement a "Score Loading"
-
+    // Fetch reviews for all episodes
     Promise.all(eps.map(ep =>
       $fetch<EpisodeReview | null>(`${config.public.apiBase}/anime/${animeId.value}/episodes/${ep.episode_code}/review`)
         .then(r => {
