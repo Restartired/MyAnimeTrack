@@ -19,6 +19,7 @@ class AnimeOut(BaseModel):
     created_at: datetime
     source_id: Optional[str]
     cover_image_url: Optional[str]
+    my_score: Optional[int] = None
 
 
 class EpisodeCreate(BaseModel):

@@ -24,6 +24,101 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def sync_bangumi_data(anime_id: int, source_id: str, cur):
+    """
+    Helper function to sync anime details and episodes from Bangumi.
+    """
+    if not source_id or not source_id.startswith("BGM-"):
+        return
+
+    try:
+        bgm_id = source_id.split("-")[1]
+        
+        # 1. Fetch Subject Detail for Cover Image (Update only if missing or force sync)
+        try:
+            subject_resp = requests.get(
+                f"https://api.bgm.tv/v0/subjects/{bgm_id}",
+                headers={"User-Agent": "MyAnimeTrack/1.0"},
+                timeout=5
+            )
+            if subject_resp.status_code == 200:
+                subj_data = subject_resp.json()
+                images = subj_data.get("images", {})
+                cover_url = images.get("large") or images.get("common") or images.get("medium")
+                
+                # Update cover image (always update on sync)
+                if cover_url:
+                    cur.execute("""
+                        UPDATE Anime SET cover_image_url = %s WHERE id = %s
+                    """, (cover_url, anime_id))
+        except Exception as e:
+            print(f"Failed to fetch cover image: {e}")
+
+        # 2. Fetch episodes from Bangumi
+        ep_response = requests.get(
+            f"https://api.bgm.tv/v0/episodes",
+            params={"subject_id": bgm_id},
+            headers={"User-Agent": "MyAnimeTrack/1.0"},
+            timeout=10
+        )
+        
+        if ep_response.status_code == 200:
+            ep_data = ep_response.json()
+            episodes_to_insert = []
+            
+            for ep in ep_data.get("data", []):
+                # Map Bangumi type to system type
+                # 0: 本篇 -> main
+                # 1: SP -> sp
+                # 2: OP -> op
+                # 3: ED -> ed
+                # Other -> trailer/other
+                ep_type_val = ep.get("type")
+                if ep_type_val == 0:
+                    ep_type = "main"
+                    sort_val = ep.get('sort')
+                    try:
+                        ep_code = f"E{int(float(sort_val)):02d}"
+                    except:
+                        ep_code = f"E{sort_val}"
+                elif ep_type_val == 1:
+                    ep_type = "sp"
+                    ep_code = f"SP{ep.get('sort')}"
+                elif ep_type_val == 2:
+                    ep_type = "op"
+                    ep_code = f"OP{ep.get('sort')}"
+                elif ep_type_val == 3:
+                    ep_type = "ed"
+                    ep_code = f"ED{ep.get('sort')}"
+                else:
+                    ep_type = "other"
+                    ep_code = f"O{ep.get('sort')}"
+                    
+                episodes_to_insert.append((
+                    anime_id,
+                    ep_code,
+                    ep_type,
+                    0, # display_order not used anymore for sorting
+                    ep.get("name_cn") or ep.get("name"),
+                    ep.get("airdate") or None
+                ))
+            
+            if episodes_to_insert:
+                # Use UPSERT to update existing episodes or insert new ones
+                # Conflict on (anime_id, episode_code)
+                cur.executemany("""
+                    INSERT INTO Episode (
+                        anime_id, episode_code, episode_type, display_order, title, air_date
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (anime_id, episode_code) 
+                    DO UPDATE SET
+                        title = EXCLUDED.title,
+                        air_date = EXCLUDED.air_date
+                """, episodes_to_insert)
+    except Exception as e:
+        print(f"Failed to sync episodes from Bangumi: {e}")
+        pass
+
 
 # POST /anime（添加番剧）
 @app.post("/anime", response_model=AnimeOut)
@@ -32,6 +127,12 @@ def create_anime(anime: AnimeCreate):
     cur = conn.cursor()
 
     try:
+        # Check if exists if source_id is provided
+        if anime.source_id:
+            cur.execute("SELECT id FROM Anime WHERE source_id = %s", (anime.source_id,))
+            if cur.fetchone():
+                raise HTTPException(status_code=409, detail=f"Anime with source_id {anime.source_id} already exists")
+
         cur.execute("""
             INSERT INTO Anime (title, start_date, total_episodes, source_id, cover_image_url)
             VALUES (%s, %s, %s, %s, %s)
@@ -47,90 +148,19 @@ def create_anime(anime: AnimeCreate):
         row = cur.fetchone()
         new_anime_id = row[0]
         
-        # Bangumi Episode Sync Logic
+        # Bangumi Episode Sync Logic (Refactored)
         if anime.source_id and anime.source_id.startswith("BGM-"):
-            try:
-                bgm_id = anime.source_id.split("-")[1]
-                
-                # Fetch Subject Detail for Cover Image if not provided
-                if not anime.cover_image_url:
-                    try:
-                        subject_resp = requests.get(
-                            f"https://api.bgm.tv/v0/subjects/{bgm_id}",
-                            headers={"User-Agent": "MyAnimeTrack/1.0"},
-                            timeout=5
-                        )
-                        if subject_resp.status_code == 200:
-                            subj_data = subject_resp.json()
-                            images = subj_data.get("images", {})
-                            cover_url = images.get("large") or images.get("common") or images.get("medium")
-                            
-                            if cover_url:
-                                cur.execute("""
-                                    UPDATE Anime SET cover_image_url = %s WHERE id = %s
-                                """, (cover_url, new_anime_id))
-                                # Update row data for return
-                                row = list(row)
-                                row[6] = cover_url
-                                row = tuple(row)
-                    except Exception as e:
-                        print(f"Failed to fetch cover image: {e}")
-
-                # Fetch episodes from Bangumi
-                ep_response = requests.get(
-                    f"https://api.bgm.tv/v0/episodes",
-                    params={"subject_id": bgm_id},
-                    headers={"User-Agent": "MyAnimeTrack/1.0"},
-                    timeout=10
-                )
-                
-                if ep_response.status_code == 200:
-                    ep_data = ep_response.json()
-                    episodes_to_insert = []
-                    
-                    for ep in ep_data.get("data", []):
-                        # Map Bangumi type to system type
-                        # 0: 本篇 -> main
-                        # 1: SP -> sp
-                        # 2: OP -> skip
-                        # 3: ED -> skip
-                        ep_type_val = ep.get("type")
-                        if ep_type_val == 0:
-                            ep_type = "main"
-                            sort_val = ep.get('sort')
-                            try:
-                                # Try to convert to int first if it's a number (even float like 1.0)
-                                ep_code = f"E{int(float(sort_val)):02d}"
-                            except:
-                                # Fallback if it's not a standard number
-                                ep_code = f"E{sort_val}"
-                        elif ep_type_val == 1:
-                            ep_type = "sp"
-                            ep_code = f"SP{ep.get('sort')}"
-                        else:
-                            continue # Skip OP/ED/Trailer etc
-                            
-                        episodes_to_insert.append((
-                            new_anime_id,
-                            ep_code,
-                            ep_type,
-                            ep.get("sort"),
-                            ep.get("name_cn") or ep.get("name"),
-                            ep.get("airdate") or None
-                        ))
-                    
-                    if episodes_to_insert:
-                        cur.executemany("""
-                            INSERT INTO Episode (
-                                anime_id, episode_code, episode_type, display_order, title, air_date
-                            ) VALUES (%s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (anime_id, episode_code) DO NOTHING
-                        """, episodes_to_insert)
-            except Exception as e:
-                print(f"Failed to sync episodes from Bangumi: {e}")
-                pass
+            sync_bangumi_data(new_anime_id, anime.source_id, cur)
 
         conn.commit()
+        
+        # Retrieve final state (incase sync updated cover)
+        cur.execute("SELECT id, title, start_date, total_episodes, created_at, source_id, cover_image_url FROM Anime WHERE id = %s", (new_anime_id,))
+        final_row = cur.fetchone()
+        
+    except HTTPException as he:
+        conn.rollback()
+        raise he
     except Exception as e:
         conn.rollback()
         raise e
@@ -139,14 +169,102 @@ def create_anime(anime: AnimeCreate):
         conn.close()
 
     return {
-        "id": row[0],
-        "title": row[1],
-        "start_date": row[2],
-        "total_episodes": row[3],
-        "created_at": row[4],
-        "source_id": row[5],
-        "cover_image_url": row[6]
+        "id": final_row[0],
+        "title": final_row[1],
+        "start_date": final_row[2],
+        "total_episodes": final_row[3],
+        "created_at": final_row[4],
+        "source_id": final_row[5],
+        "cover_image_url": final_row[6]
     }
+
+
+# POST /anime/check_import（检查导入）
+@app.post("/anime/check_import")
+def check_import(data: dict):
+    url_or_id = data.get("url_or_id")
+    if not url_or_id:
+        return {"error": "Missing input"}
+        
+    # Extract Bangumi ID
+    bgm_id = None
+    if "bangumi.tv/subject/" in url_or_id:
+        try:
+            bgm_id = url_or_id.split("subject/")[1].split("/")[0].split("?")[0]
+        except:
+             return {"error": "Invalid URL format"}
+    elif url_or_id.isdigit():
+        bgm_id = url_or_id
+        
+    if not bgm_id:
+        return {"error": "Could not parse Bangumi ID"}
+        
+    source_id = f"BGM-{bgm_id}"
+    
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, title FROM Anime WHERE source_id = %s", (source_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    
+    if row:
+        return {
+            "exists": True,
+            "id": row[0],
+            "title": row[1],
+            "source_id": source_id
+        }
+    
+    # Check if valid on Bangumi
+    try:
+        resp = requests.get(f"https://api.bgm.tv/v0/subjects/{bgm_id}", headers={"User-Agent": "MyAnimeTrack/1.0"})
+        if resp.status_code == 404:
+             return {"exists": False, "valid": False, "error": "Bangumi ID not found"}
+        data = resp.json()
+        
+        images = data.get("images", {})
+        cover_image = images.get("large") or images.get("common")
+        
+        return {
+            "exists": False,
+            "valid": True,
+            "source_id": source_id,
+            "title": data.get("name_cn") or data.get("name"),
+            "start_date": data.get("date"),
+            "total_episodes": data.get("eps") or data.get("total_episodes"),
+            "cover_image_url": cover_image
+        }
+    except:
+        return {"exists": False, "valid": False, "error": "Bangumi API Error"}
+
+
+# POST /anime/{id}/sync（原地更新）
+@app.post("/anime/{anime_id}/sync")
+def sync_anime(anime_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    cur.execute("SELECT source_id FROM Anime WHERE id = %s", (anime_id,))
+    row = cur.fetchone()
+    if not row or not row[0]:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Anime has no source_id to sync from")
+        
+    source_id = row[0]
+    
+    try:
+        sync_bangumi_data(anime_id, source_id, cur)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+        
+    return {"status": "ok"}
 
 
 # DELETE /anime/{anime_id}（删除番剧）
@@ -156,22 +274,13 @@ def delete_anime(anime_id: int):
     cur = conn.cursor()
     
     try:
-        # 1. Delete Episode Reviews
         cur.execute("""
             DELETE FROM EpisodeReview
             WHERE episode_id IN (SELECT id FROM Episode WHERE anime_id = %s)
         """, (anime_id,))
-        
-        # 2. Delete Episodes
         cur.execute("DELETE FROM Episode WHERE anime_id = %s", (anime_id,))
-        
-        # 3. Delete Anime Reviews
         cur.execute("DELETE FROM AnimeReview WHERE anime_id = %s", (anime_id,))
-        
-        # 4. Delete Collection Links
         cur.execute("DELETE FROM CollectionAnime WHERE anime_id = %s", (anime_id,))
-        
-        # 5. Delete Anime
         cur.execute("DELETE FROM Anime WHERE id = %s", (anime_id,))
         
         if cur.rowcount == 0:
@@ -195,9 +304,10 @@ def get_anime():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT id, title, start_date, total_episodes, created_at, source_id, cover_image_url
-        FROM Anime
-        ORDER BY created_at DESC
+        SELECT a.id, a.title, a.start_date, a.total_episodes, a.created_at, a.source_id, a.cover_image_url, ar.score
+        FROM Anime a
+        LEFT JOIN AnimeReview ar ON a.id = ar.anime_id
+        ORDER BY a.created_at DESC
     """)
     rows = cur.fetchall()
 
@@ -213,6 +323,7 @@ def get_anime():
             "created_at": r[4],
             "source_id": r[5],
             "cover_image_url": r[6],
+            "my_score": r[7]
         }
         for r in rows
     ]
@@ -258,14 +369,20 @@ def get_episodes(anime_id: int):
     conn = get_conn()
     cur = conn.cursor()
 
+    # Sort by Air Date, then fallback to parsing number from code if possible, or string sort
     cur.execute("""
         SELECT episode_code, episode_type, display_order, title, air_date
         FROM Episode
         WHERE anime_id = %s
         ORDER BY 
-            CASE WHEN episode_type = 'main' THEN 0 ELSE 1 END,
-            display_order,
-            air_date NULLS LAST
+            CASE 
+                WHEN episode_type = 'main' THEN 0 
+                WHEN episode_type = 'sp' THEN 2 
+                WHEN episode_type = 'ova' THEN 3
+                ELSE 1 
+            END,
+            air_date NULLS LAST, 
+            episode_code
     """, (anime_id,))
 
     rows = cur.fetchall()
@@ -291,7 +408,6 @@ def delete_episode(anime_id: int, episode_code: str):
     cur = conn.cursor()
     
     try:
-        # Find episode ID
         cur.execute("SELECT id FROM Episode WHERE anime_id = %s AND episode_code = %s", (anime_id, episode_code))
         row = cur.fetchone()
         
@@ -299,13 +415,8 @@ def delete_episode(anime_id: int, episode_code: str):
             raise HTTPException(status_code=404, detail="Episode not found")
             
         episode_id = row[0]
-        
-        # Delete reviews
         cur.execute("DELETE FROM EpisodeReview WHERE episode_id = %s", (episode_id,))
-        
-        # Delete episode
         cur.execute("DELETE FROM Episode WHERE id = %s", (episode_id,))
-        
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -327,7 +438,6 @@ def create_episode_review(
     conn = get_conn()
     cur = conn.cursor()
 
-    # 通过业务身份查 episode_id
     cur.execute("""
         SELECT id
         FROM Episode
@@ -342,7 +452,6 @@ def create_episode_review(
 
     episode_id = row[0]
 
-    # 写评价（UPSERT）
     cur.execute("""
         INSERT INTO EpisodeReview (episode_id, score, comment)
         VALUES (%s, %s, %s)

@@ -3,13 +3,14 @@
     <el-card>
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
-          <span>番剧列表</span>
+          <div style="font-weight: bold; font-size: 18px;">番剧列表</div>
           <div style="display: flex; gap: 10px; align-items: center;">
-            <el-select v-model="sortBy" placeholder="排序" size="small" style="width: 120px; margin-right: 10px;">
+            <el-select v-model="sortBy" placeholder="排序" size="small" style="width: 120px;">
               <el-option label="默认(上传时间)" value="newest" />
               <el-option label="最早上传" value="oldest" />
               <el-option label="开播日期" value="air_date" />
               <el-option label="标题" value="title" />
+              <el-option label="我的评分" value="rating" />
             </el-select>
 
             <el-radio-group v-model="viewMode" size="small">
@@ -44,6 +45,12 @@
                       style="color: white; font-weight: bold; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                       {{ anime.title }}
                     </div>
+                  </div>
+
+                  <!-- Rating Badge -->
+                  <div v-if="anime.my_score"
+                    style="position: absolute; top: 10px; right: 10px; background: rgba(255,165,0,0.9); color: white; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 12px;">
+                    {{ anime.my_score }} ★
                   </div>
                 </div>
 
@@ -81,6 +88,13 @@
             <el-table-column prop="title" label="标题" />
             <el-table-column prop="start_date" label="开播日期" width="120" />
             <el-table-column prop="total_episodes" label="总集数" width="100" />
+            <el-table-column label="评分" width="100" sortable
+              :sort-method="(a, b) => (a.my_score || 0) - (b.my_score || 0)">
+              <template #default="{ row }">
+                <span v-if="row.my_score" style="color: #ff9900; font-weight: bold;">{{ row.my_score }} 分</span>
+                <span v-else style="color: #ccc;">-</span>
+              </template>
+            </el-table-column>
             <el-table-column label="上传时间" width="180">
               <template #default="{ row }">
                 {{ formatDate(row.created_at) }}
@@ -102,7 +116,6 @@
     </el-card>
 
     <el-dialog v-model="showCreateDialog" title="添加番剧" width="600px">
-      <!-- (Dialog content remains exact same) -->
       <el-tabs v-model="activeTab">
         <el-tab-pane label="手动输入" name="manual">
           <el-form :model="newAnime" label-width="100px" style="margin-top: 20px">
@@ -124,15 +137,19 @@
             </el-form-item>
           </el-form>
         </el-tab-pane>
-        <el-tab-pane label="从 Bangumi 搜索" name="search">
+
+        <el-tab-pane label="从 Bangumi / URL 导入" name="search">
           <div style="margin-top: 20px">
-            <el-form inline>
-              <el-form-item label="搜索">
-                <el-input v-model="searchQuery" placeholder="输入番剧名称" @keyup.enter="searchBangumi"
-                  style="width: 300px" />
+            <el-alert title="贴士" type="info" description="可以直接输入 Bangumi URL (如 https://bangumi.tv/subject/9912) 或 ID"
+              show-icon :closable="false" style="margin-bottom: 20px;" />
+
+            <el-form inline @submit.prevent>
+              <el-form-item label="搜索/导入">
+                <el-input v-model="searchQuery" placeholder="番剧名 / https://bangumi.tv/subject/..."
+                  @keyup.enter="handleSearchOrImport" style="width: 300px" />
               </el-form-item>
               <el-form-item>
-                <el-button type="primary" @click="searchBangumi" :loading="searching">搜索</el-button>
+                <el-button type="primary" @click="handleSearchOrImport" :loading="searching">搜索 / 检查</el-button>
               </el-form-item>
             </el-form>
 
@@ -140,6 +157,26 @@
               {{ searchError }}
             </div>
 
+            <!-- Import Preview Result -->
+            <div v-if="importPreview" style="margin-top: 20px;">
+              <el-card shadow="never">
+                <div style="display: flex;">
+                  <img v-if="importPreview.cover_image_url" :src="importPreview.cover_image_url"
+                    style="width: 80px; height: 112px; object-fit: cover; border-radius: 4px; margin-right: 15px;" />
+                  <div style="flex: 1;">
+                    <h3 style="margin-top: 0;">{{ importPreview.title }}</h3>
+                    <div style="font-size: 13px; color: #666; margin-bottom: 10px;">
+                      <div>开播: {{ importPreview.start_date }}</div>
+                      <div>集数: {{ importPreview.total_episodes }}</div>
+                      <div>来源: {{ importPreview.source_id }}</div>
+                    </div>
+                    <el-button type="success" @click="confirmImport">确认导入</el-button>
+                  </div>
+                </div>
+              </el-card>
+            </div>
+
+            <!-- Standard Search Results -->
             <div v-if="searchResults.length > 0" style="margin-top: 20px; max-height: 400px; overflow-y: auto;">
               <el-card v-for="result in searchResults" :key="result.id" shadow="hover"
                 style="margin-bottom: 10px; cursor: pointer" @click="selectSearchResult(result)">
@@ -174,7 +211,7 @@
 
       <template #footer>
         <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" @click="createAnime">确定</el-button>
+        <el-button type="primary" @click="createAnime" v-if="activeTab === 'manual'">确定</el-button>
       </template>
     </el-dialog>
   </div>
@@ -191,6 +228,7 @@ interface Anime {
   created_at: string
   source_id: string | null
   cover_image_url: string | null
+  my_score: number | null
 }
 
 interface BangumiSearchResult {
@@ -208,7 +246,7 @@ interface BangumiSearchResult {
 const config = useRuntimeConfig()
 const router = useRouter()
 const viewMode = ref('card')
-const sortBy = ref('newest') // newest, oldest, air_date, title
+const sortBy = ref('newest') // newest, oldest, air_date, title, rating
 
 const { data: animeList, pending, error, refresh } = await useAsyncData<Anime[]>(
   'anime-list',
@@ -233,6 +271,8 @@ const sortedAnimeList = computed(() => {
       })
     case 'title':
       return list.sort((a, b) => a.title.localeCompare(b.title, 'zh'))
+    case 'rating':
+      return list.sort((a, b) => (b.my_score || 0) - (a.my_score || 0))
   }
   return list
 })
@@ -243,6 +283,8 @@ const searchQuery = ref('')
 const searchResults = ref<BangumiSearchResult[]>([])
 const searching = ref(false)
 const searchError = ref('')
+// Import Logic
+const importPreview = ref<any>(null)
 
 const newAnime = ref({
   title: '',
@@ -252,8 +294,80 @@ const newAnime = ref({
   cover_image_url: null as string | null
 })
 
+const handleSearchOrImport = async () => {
+  if (!searchQuery.value.trim()) return
+
+  // Simply check if it looks like a URL or ID first to see if we should try check_import
+  if (searchQuery.value.includes('bangumi.tv') || /^\d+$/.test(searchQuery.value.trim())) {
+    await checkImport()
+  } else {
+    await searchBangumi()
+  }
+}
+
+const checkImport = async () => {
+  searching.value = true
+  searchError.value = ''
+  searchResults.value = []
+  importPreview.value = null
+
+  try {
+    const res = await $fetch<any>(`${config.public.apiBase}/anime/check_import`, {
+      method: 'POST',
+      body: { url_or_id: searchQuery.value.trim() }
+    })
+
+    if (res.error) {
+      searchError.value = res.error
+      return
+    }
+
+    if (res.exists) {
+      ElMessageBox.confirm(
+        `番剧 "${res.title}" 已存在。是否更新信息？(保留评价)`,
+        '番剧已存在',
+        {
+          confirmButtonText: '更新',
+          cancelButtonText: '查看',
+          type: 'info'
+        }
+      ).then(async () => {
+        // Update
+        await $fetch(`${config.public.apiBase}/anime/${res.id}/sync`, { method: 'POST' })
+        ElMessage.success('更新成功')
+        refresh()
+        goToAnime(res.id)
+      }).catch(() => {
+        // Just go there
+        goToAnime(res.id)
+      })
+    } else if (res.valid) {
+      // Show preview to confirm
+      importPreview.value = res
+    }
+
+  } catch (e) {
+    console.error(e)
+    searchError.value = '检查导入失败'
+  } finally {
+    searching.value = false
+  }
+}
+
+const confirmImport = async () => {
+  if (!importPreview.value) return
+
+  newAnime.value = {
+    title: importPreview.value.title,
+    start_date: importPreview.value.start_date,
+    total_episodes: importPreview.value.total_episodes,
+    source_id: importPreview.value.source_id,
+    cover_image_url: importPreview.value.cover_image_url
+  }
+  await createAnime()
+}
+
 const searchBangumi = async () => {
-  // ... search logic
   if (!searchQuery.value.trim()) {
     ElMessage.warning('请输入搜索关键词')
     return
@@ -262,6 +376,7 @@ const searchBangumi = async () => {
   searching.value = true
   searchError.value = ''
   searchResults.value = []
+  importPreview.value = null
 
   try {
     const response = await $fetch<{ results: BangumiSearchResult[], error?: string }>(
@@ -297,8 +412,8 @@ const selectSearchResult = (result: BangumiSearchResult) => {
     source_id: result.source_id,
     cover_image_url: result.cover_image
   }
-  activeTab.value = 'manual'
-  ElMessage.success('已填充数据，请确认后点击确定')
+  // Immediately create
+  createAnime()
 }
 
 const createAnime = async () => {
@@ -308,7 +423,7 @@ const createAnime = async () => {
   }
 
   try {
-    await $fetch(`${config.public.apiBase}/anime`, {
+    const res = await $fetch<Anime>(`${config.public.apiBase}/anime`, {
       method: 'POST',
       body: {
         title: newAnime.value.title,
@@ -329,11 +444,17 @@ const createAnime = async () => {
     }
     searchQuery.value = ''
     searchResults.value = []
+    importPreview.value = null
     activeTab.value = 'manual'
     refresh()
-  } catch (error) {
-    ElMessage.error('添加失败')
-    console.error(error)
+  } catch (error: any) {
+    if (error.response && error.response.status === 409) {
+      ElMessage.info('番剧已存在')
+      // Could trigger auto-search here if we parsed ID but simplified for now
+    } else {
+      ElMessage.error('添加失败')
+      console.error(error)
+    }
   }
 }
 
