@@ -239,6 +239,174 @@ def check_import(data: dict):
         return {"exists": False, "valid": False, "error": "Bangumi API Error"}
 
 
+# POST /bangumi/import_collection（批量导入）
+@app.post("/bangumi/import_collection")
+def import_collection(data: dict):
+    url = data.get("url")
+    if not url:
+        return {"error": "Missing URL"}
+        
+    # Parse URL: http://bangumi.tv/anime/list/{username}/{type}
+    try:
+        parts = url.replace("https://", "").replace("http://", "").split("/")
+        # format: bangumi.tv / anime / list / {username} / {type}
+        if len(parts) < 5 or parts[1] != "anime" or parts[2] != "list":
+             return {"error": "Invalid Collection URL format. Expected: bangumi.tv/anime/list/{username}/{type}"}
+        
+        username = parts[3]
+        type_str = parts[4].split("?")[0]
+        
+        type_map = {
+            "wish": 1,
+            "collect": 2,
+            "do": 3,
+            "on_hold": 4,
+            "dropped": 5
+        }
+        
+        collection_type = type_map.get(type_str)
+        if not collection_type:
+            # Maybe it's not a type needed to be mapped? Use correct type or default to 2 (collect)?
+            # But the user specified URL format.
+             return {"error": f"Unknown collection type: {type_str}"}
+             
+    except Exception as e:
+        return {"error": f"Failed to parse URL: {e}"}
+
+    # Fetch User Collection
+    try:
+        # Fetching first 50 items for now. 
+        # Ideally should loop with offset until empty, but let's start safe.
+        limit = 50
+        offset = 0
+        added_count = 0
+        updated_count = 0
+        failed_count = 0
+        
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # We might need to pagination loop here
+        # For this iteration, let's just do one page or two.
+        
+        while True:
+            resp = requests.get(
+                f"https://api.bgm.tv/v0/users/{username}/collections",
+                params={
+                    "subject_type": 2, # Anime
+                    "type": collection_type,
+                    "limit": limit,
+                    "offset": offset
+                },
+                headers={"User-Agent": "MyAnimeTrack/1.0"},
+                timeout=15
+            )
+            
+            if resp.status_code != 200:
+                break
+                
+            data = resp.json()
+            items = data.get("data", [])
+            if not items:
+                break
+                
+            for item in items:
+                try:
+                    subject = item.get("subject")
+                    if not subject:
+                        continue
+                        
+                    bgm_id = subject.get("id")
+                    source_id = f"BGM-{bgm_id}"
+                    
+                    # Extract Rating and Comment
+                    imported_score = item.get("rate")
+                    imported_comment = item.get("comment")
+                    if imported_comment and not imported_comment.strip():
+                        imported_comment = None
+                    
+                    # Check DB
+                    cur.execute("SELECT id FROM Anime WHERE source_id = %s", (source_id,))
+                    row = cur.fetchone()
+                    
+                    anime_id = None
+                    if row:
+                        # EXISTS -> Update
+                        anime_id = row[0]
+                        sync_bangumi_data(anime_id, source_id, cur)
+                        updated_count += 1
+                    else:
+                        # NEW -> Insert
+                        title = subject.get("name_cn") or subject.get("name")
+                        start_date = subject.get("date")
+                        # Truncate date if needed
+                        if start_date and len(start_date) > 10: start_date = start_date[:10]
+                        
+                        eps = subject.get("eps") or subject.get("total_episodes")
+                        
+                        images = subject.get("images", {})
+                        cover = images.get("large") or images.get("common")
+                        
+                        cur.execute("""
+                            INSERT INTO Anime (title, start_date, total_episodes, source_id, cover_image_url)
+                            VALUES (%s, %s, %s, %s, %s)
+                            RETURNING id
+                        """, (title, start_date, eps, source_id, cover))
+                        
+                        anime_id = cur.fetchone()[0]
+                        sync_bangumi_data(anime_id, source_id, cur)
+                        added_count += 1
+                    
+                    # Handle ReviewSync (Do not overwrite valid local data)
+                    if anime_id and (imported_score or imported_comment):
+                        cur.execute("SELECT score, comment FROM AnimeReview WHERE anime_id = %s", (anime_id,))
+                        review_row = cur.fetchone()
+                        
+                        if not review_row:
+                            # No review exists, safe to insert both
+                            cur.execute("""
+                                INSERT INTO AnimeReview (anime_id, score, comment)
+                                VALUES (%s, %s, %s)
+                            """, (anime_id, imported_score, imported_comment))
+                        else:
+                            # Review exists, check what is missing
+                            local_score, local_comment = review_row
+                            
+                            new_score = local_score if (local_score is not None and local_score > 0) else imported_score
+                            new_comment = local_comment if (local_comment and local_comment.strip()) else imported_comment
+                            
+                            # Update if we have something new to add (and it's different)
+                            if (new_score != local_score) or (new_comment != local_comment):
+                                cur.execute("""
+                                    UPDATE AnimeReview 
+                                    SET score = %s, comment = %s
+                                    WHERE anime_id = %s
+                                """, (new_score, new_comment, anime_id))
+
+                except Exception as e:
+                    print(f"Error importing item: {e}")
+                    failed_count += 1
+                    
+            offset += limit
+            if offset >= data.get("total", 0) or offset > 200: # Safety break at 200
+                break
+                
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return {
+            "status": "ok",
+            "added": added_count,
+            "updated": updated_count,
+            "failed": failed_count,
+            "message": f"Successfully imported: {added_count} added, {updated_count} updated."
+        }
+        
+    except Exception as e:
+        return {"error": f"Import failed: {e}"}
+
+
 # POST /anime/{id}/sync（原地更新）
 @app.post("/anime/{anime_id}/sync")
 def sync_anime(anime_id: int):

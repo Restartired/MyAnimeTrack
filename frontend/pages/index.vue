@@ -140,13 +140,15 @@
 
         <el-tab-pane label="从 Bangumi / URL 导入" name="search">
           <div style="margin-top: 20px">
-            <el-alert title="贴士" type="info" description="可以直接输入 Bangumi URL (如 https://bangumi.tv/subject/9912) 或 ID"
-              show-icon :closable="false" style="margin-bottom: 20px;" />
+            <el-alert title="贴士" type="info" description="可以输入:
+1. 番剧URL 或 ID
+2. 收藏夹URL (如 bangumi.tv/anime/list/username/collect) 进行批量导入" show-icon :closable="false"
+              style="margin-bottom: 20px;" />
 
             <el-form inline @submit.prevent>
               <el-form-item label="搜索/导入">
-                <el-input v-model="searchQuery" placeholder="番剧名 / https://bangumi.tv/subject/..."
-                  @keyup.enter="handleSearchOrImport" style="width: 300px" />
+                <el-input v-model="searchQuery" placeholder="番剧名 / URL / 收藏夹URL" @keyup.enter="handleSearchOrImport"
+                  style="width: 300px" />
               </el-form-item>
               <el-form-item>
                 <el-button type="primary" @click="handleSearchOrImport" :loading="searching">搜索 / 检查</el-button>
@@ -295,13 +297,59 @@ const newAnime = ref({
 })
 
 const handleSearchOrImport = async () => {
-  if (!searchQuery.value.trim()) return
+  const q = searchQuery.value.trim()
+  if (!q) return
 
-  // Simply check if it looks like a URL or ID first to see if we should try check_import
-  if (searchQuery.value.includes('bangumi.tv') || /^\d+$/.test(searchQuery.value.trim())) {
+  // 1. Check for Collection URL Import
+  if (q.includes('bangumi.tv/anime/list/')) {
+    await handleBatchImport(q)
+    return
+  }
+
+  // 2. Check for Subject URL/ID Import (Existing logic)
+  if (q.includes('bangumi.tv') || /^\d+$/.test(q)) {
     await checkImport()
   } else {
+    // 3. Regular Search
     await searchBangumi()
+  }
+}
+
+const handleBatchImport = async (url: string) => {
+  searching.value = true
+  searchError.value = ''
+  try {
+    ElMessage.info('正在批量导入，请稍候...')
+    const res = await $fetch<any>(`${config.public.apiBase}/bangumi/import_collection`, {
+      method: 'POST',
+      body: { url }
+    })
+
+    if (res.error) {
+      searchError.value = res.error
+      ElMessage.error(res.error)
+    } else {
+      ElMessageBox.alert(
+        `导入成功！\n新增: ${res.added}\n更新: ${res.updated}\n失败: ${res.failed}`,
+        '结果',
+        { type: 'success' }
+      )
+      refresh()
+      showCreateDialog.value = false
+      searchQuery.value = ''
+    }
+  } catch (e: any) {
+    console.error(e)
+    // Check if timeout (likely for batch)
+    if (e.message && e.message.includes('timeout')) {
+      ElMessage.warning('请求超时，后台可能仍在处理中，请稍后刷新列表查看。')
+      showCreateDialog.value = false
+    } else {
+      searchError.value = '批量导入失败'
+      ElMessage.error('批量导入失败')
+    }
+  } finally {
+    searching.value = false
   }
 }
 
