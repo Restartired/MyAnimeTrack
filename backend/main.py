@@ -876,9 +876,10 @@ def get_collection_anime(collection_id: int):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT a.id, a.title, a.start_date, a.total_episodes, a.created_at, a.source_id, a.cover_image_url
+        SELECT a.id, a.title, a.start_date, a.total_episodes, a.created_at, a.source_id, a.cover_image_url, ar.score
         FROM Anime a
         JOIN CollectionAnime ca ON a.id = ca.anime_id
+        LEFT JOIN AnimeReview ar ON a.id = ar.anime_id
         WHERE ca.collection_id = %s
         ORDER BY a.created_at DESC
     """, (collection_id,))
@@ -896,6 +897,7 @@ def get_collection_anime(collection_id: int):
             "created_at": r[4],
             "source_id": r[5],
             "cover_image_url": r[6],
+            "my_score": r[7]
         }
         for r in rows
     ]

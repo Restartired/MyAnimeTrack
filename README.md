@@ -1,6 +1,6 @@
 # MyAnimeTrack
 
-一个基于 FastAPI + Nuxt 3 + PostgreSQL 的个人番剧追踪/管理系统。这是一个新手练手项目。
+一个基于 FastAPI + Nuxt 3 + PostgreSQL 的个人番剧追踪/管理系统。这是一个 VibeCoding 项目。
 
 ## 简介
 
@@ -21,6 +21,13 @@ MyAnimeTrack 允许你管理你的番剧观看进度，支持从 Bangumi 导入�
 - **进度追踪**: 标记剧集观看状态（通过评分/评论）。
 - **评分系统**: 个人评分与详细评价。
 - **收藏夹**: 自定义收藏夹分类管理。
+
+## 效果展示
+
+![alt text](image.png)
+
+![alt text](image-1.png)
+
 
 ## 运行环境
 
