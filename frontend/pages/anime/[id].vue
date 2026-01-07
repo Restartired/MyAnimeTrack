@@ -1,16 +1,22 @@
 <template>
-  <div v-if="anime">
+  <div v-if="anime" v-loading="pending">
     <el-card>
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <h2>{{ anime.title }}</h2>
-          <el-button type="danger" @click="deleteAnime">删除番剧</el-button>
+          <div style="display: flex; gap: 10px;">
+            <el-button type="primary" @click="showAddToCollectionDialog = true">加入收藏夹</el-button>
+            <el-button type="danger" @click="deleteAnime">删除番剧</el-button>
+          </div>
         </div>
       </template>
       <div style="margin-bottom: 20px">
         <div v-if="anime.start_date">开播日期: {{ anime.start_date }}</div>
         <div v-if="anime.total_episodes">总集数: {{ anime.total_episodes }}</div>
         <div v-if="anime.source_id">来源ID: {{ anime.source_id }}</div>
+        <div v-if="anime.created_at" style="color: #666; font-size: 14px; margin-top: 5px;">
+          上传时间: {{ formatDate(anime.created_at) }}
+        </div>
       </div>
     </el-card>
 
@@ -23,12 +29,7 @@
           <el-rate v-model="animeReview.score" :max="10" show-score />
         </el-form-item>
         <el-form-item label="评价">
-          <el-input
-            v-model="animeReview.comment"
-            type="textarea"
-            :rows="4"
-            placeholder="请输入评价"
-          />
+          <el-input v-model="animeReview.comment" type="textarea" :rows="4" placeholder="请输入评价" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="saveAnimeReview">保存评价</el-button>
@@ -59,6 +60,22 @@
       <el-empty v-if="episodes && episodes.length === 0 && !episodesLoading" description="暂无剧集" />
     </el-card>
 
+    <!-- Dialogs -->
+    <el-dialog v-model="showAddToCollectionDialog" title="加入收藏夹" width="500px">
+      <div v-if="collectionsLoading">加载中...</div>
+      <el-form v-else label-width="100px">
+        <el-form-item label="选择收藏夹" required>
+          <el-select v-model="selectedCollectionId" placeholder="请选择收藏夹" style="width: 100%">
+            <el-option v-for="c in collections" :key="c.id" :label="c.name" :value="c.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddToCollectionDialog = false">取消</el-button>
+        <el-button type="primary" @click="addToCollection">确定</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="showEpisodeDialog" title="添加剧集" width="500px">
       <el-form :model="newEpisode" label-width="120px">
         <el-form-item label="剧集代码" required>
@@ -79,14 +96,8 @@
           <el-input v-model="newEpisode.title" placeholder="可选" />
         </el-form-item>
         <el-form-item label="播出日期">
-          <el-date-picker
-            v-model="newEpisode.air_date"
-            type="date"
-            placeholder="选择日期"
-            format="YYYY-MM-DD"
-            value-format="YYYY-MM-DD"
-            style="width: 100%"
-          />
+          <el-date-picker v-model="newEpisode.air_date" type="date" placeholder="选择日期" format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -101,12 +112,7 @@
           <el-rate v-model="episodeReview.score" :max="10" show-score />
         </el-form-item>
         <el-form-item label="评价">
-          <el-input
-            v-model="episodeReview.comment"
-            type="textarea"
-            :rows="4"
-            placeholder="请输入评价"
-          />
+          <el-input v-model="episodeReview.comment" type="textarea" :rows="4" placeholder="请输入评价" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -152,84 +158,99 @@ interface EpisodeReview {
   reviewed_at?: string
 }
 
+interface Collection {
+  id: number
+  name: string
+}
+
 const route = useRoute()
 const router = useRouter()
 const config = useRuntimeConfig()
 
 const animeId = computed(() => parseInt(route.params.id as string))
 
-// 获取番剧列表
-const animeList = ref<Anime[]>([])
+const { data: anime, pending } = await useAsyncData<Anime>(
+  `anime-${animeId.value}`,
+  () => $fetch<Anime>(`${config.public.apiBase}/anime`).then(list => list.find(a => a.id === animeId.value) as Anime)
+)
 
-const loadAnimeList = async () => {
-  try {
-    const data = await $fetch<Anime[]>(`${config.public.apiBase}/anime`)
-    animeList.value = data || []
-  } catch (error) {
-    console.error('加载番剧列表失败:', error)
-    animeList.value = []
-  }
-}
-
-// 初始加载
-await loadAnimeList()
-
-// 查找当前番剧
-const anime = computed(() => {
-  return animeList.value?.find(a => a.id === animeId.value)
-})
-
-// 剧集列表
 const episodes = ref<Episode[]>([])
 const episodesLoading = ref(false)
 
-// 番剧评价
 const animeReview = ref<AnimeReview>({
   score: undefined,
   comment: undefined
 })
 
-// 加载数据函数
 const loadData = async () => {
-  const id = animeId.value
-  if (!id) return
+  if (!animeId.value) return
 
   episodesLoading.value = true
   try {
-    // 加载剧集列表
-    const episodesData = await $fetch<Episode[]>(
-      `${config.public.apiBase}/anime/${id}/episodes`
-    )
+    const [episodesData, reviewData] = await Promise.all([
+      $fetch<Episode[]>(`${config.public.apiBase}/anime/${animeId.value}/episodes`),
+      $fetch<AnimeReview | null>(`${config.public.apiBase}/anime/${animeId.value}/review`).catch(() => null)
+    ])
+
     episodes.value = episodesData || []
 
-    // 加载番剧评价
-    try {
-      const reviewData = await $fetch<AnimeReview | null>(
-        `${config.public.apiBase}/anime/${id}/review`
-      )
-      animeReview.value = reviewData ? {
-        score: reviewData.score ?? undefined,
-        comment: reviewData.comment ?? undefined
-      } : { score: undefined, comment: undefined }
-    } catch (e) {
-      animeReview.value = { score: undefined, comment: undefined }
-    }
-  } catch (error) {
-    console.error('加载数据失败:', error)
-    episodes.value = []
+    animeReview.value = reviewData ? {
+      score: reviewData.score ?? undefined,
+      comment: reviewData.comment ?? undefined
+    } : { score: undefined, comment: undefined }
+
+  } catch (e) {
+    console.error(e)
   } finally {
     episodesLoading.value = false
   }
 }
 
-// 初始加载
 await loadData()
 
-// 监听路由参数变化
-watch(() => route.params.id, async () => {
-  await loadAnimeList()
-  await loadData()
+// Add to Collection Logic
+const showAddToCollectionDialog = ref(false)
+const selectedCollectionId = ref<number | null>(null)
+const collections = ref<Collection[]>([])
+const collectionsLoading = ref(false)
+
+const loadCollections = async () => {
+  collectionsLoading.value = true
+  try {
+    const data = await $fetch<Collection[]>(`${config.public.apiBase}/collections`)
+    collections.value = data || []
+  } catch (e) {
+    ElMessage.error('加载收藏夹列表失败')
+  } finally {
+    collectionsLoading.value = false
+  }
+}
+
+// Load collections when dialog opens
+watch(showAddToCollectionDialog, (val) => {
+  if (val && collections.value.length === 0) {
+    loadCollections()
+  }
 })
+
+const addToCollection = async () => {
+  if (!selectedCollectionId.value) {
+    ElMessage.warning('请选择收藏夹')
+    return
+  }
+
+  try {
+    await $fetch(`${config.public.apiBase}/collections/${selectedCollectionId.value}/anime`, {
+      method: 'POST',
+      body: { anime_id: animeId.value }
+    })
+    ElMessage.success('已加入收藏夹')
+    showAddToCollectionDialog.value = false
+    selectedCollectionId.value = null
+  } catch (e) {
+    ElMessage.error('加入失败')
+  }
+}
 
 const showEpisodeDialog = ref(false)
 const newEpisode = ref({
@@ -384,5 +405,17 @@ const deleteEpisode = (episode: Episode) => {
     .catch(() => {
       // 取消
     })
+}
+
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 </script>

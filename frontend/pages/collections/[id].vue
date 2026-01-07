@@ -4,7 +4,10 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <h2>{{ collection?.name || '收藏夹' }}</h2>
-          <el-button @click="goBack">返回</el-button>
+          <div style="display: flex; gap: 10px;">
+            <el-button type="danger" @click="deleteCollection">删除收藏夹</el-button>
+            <el-button @click="goBack">返回</el-button>
+          </div>
         </div>
         <div v-if="collection?.description" style="margin-top: 10px; color: #666">
           {{ collection.description }}
@@ -15,38 +18,31 @@
         <el-button type="primary" @click="showAddDialog = true">添加番剧到收藏夹</el-button>
       </div>
 
-      <el-row :gutter="20" v-if="animeList && animeList.length > 0">
-        <el-col :span="6" v-for="anime in animeList" :key="anime.id" style="margin-bottom: 20px">
-          <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer">
-            <template #header>
-              <div style="font-weight: bold; font-size: 16px">{{ anime.title }}</div>
+      <div v-loading="pending">
+        <el-table v-if="!pending && animeList && animeList.length > 0" :data="animeList" style="width: 100%">
+          <el-table-column label="番剧名称">
+            <template #default="{ row }">
+              <span style="font-weight: bold; cursor: pointer; color: #409EFF" @click="goToAnime(row.id)">{{ row.title
+                }}</span>
             </template>
-            <div>
-              <div v-if="anime.start_date">开播日期: {{ anime.start_date }}</div>
-              <div v-if="anime.total_episodes">总集数: {{ anime.total_episodes }}</div>
-              <div v-if="anime.source_id">来源ID: {{ anime.source_id }}</div>
-            </div>
-          </el-card>
-        </el-col>
-      </el-row>
-      <el-empty v-else description="暂无番剧" />
+          </el-table-column>
+          <el-table-column prop="start_date" label="开播日期" width="150" />
+          <el-table-column prop="total_episodes" label="总集数" width="120" />
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button type="danger" size="small" @click="removeAnime(row)">移出</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else-if="!pending" description="暂无番剧" />
+      </div>
     </el-card>
 
     <el-dialog v-model="showAddDialog" title="添加番剧到收藏夹" width="500px">
       <el-form label-width="100px">
         <el-form-item label="选择番剧" required>
-          <el-select
-            v-model="selectedAnimeId"
-            placeholder="请选择番剧"
-            filterable
-            style="width: 100%"
-          >
-            <el-option
-              v-for="anime in allAnimeList"
-              :key="anime.id"
-              :label="anime.title"
-              :value="anime.id"
-            />
+          <el-select v-model="selectedAnimeId" placeholder="请选择番剧" filterable style="width: 100%">
+            <el-option v-for="anime in allAnimeList" :key="anime.id" :label="anime.title" :value="anime.id" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -59,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Collection {
   id: number
@@ -82,53 +78,27 @@ const config = useRuntimeConfig()
 const router = useRouter()
 const collectionId = parseInt(route.params.id as string)
 
-// 获取所有收藏夹以查找当前收藏夹信息（由于没有单独的 GET /collections/{id}）
-const collections = ref<Collection[]>([])
-const animeList = ref<Anime[]>([])
-const allAnimeList = ref<Anime[]>([])
-
-const loadCollections = async () => {
-  try {
-    const data = await $fetch<Collection[]>(`${config.public.apiBase}/collections`)
-    collections.value = data || []
-  } catch (error) {
-    console.error('加载收藏夹列表失败:', error)
-    collections.value = []
-  }
-}
-
-const loadAnimeList = async () => {
-  try {
-    const data = await $fetch<Anime[]>(
-      `${config.public.apiBase}/collections/${collectionId}/anime`
-    )
-    animeList.value = data || []
-  } catch (error) {
-    console.error('加载收藏夹番剧列表失败:', error)
-    animeList.value = []
-  }
-}
-
-const loadAllAnimeList = async () => {
-  try {
-    const data = await $fetch<Anime[]>(`${config.public.apiBase}/anime`)
-    allAnimeList.value = data || []
-  } catch (error) {
-    console.error('加载所有番剧列表失败:', error)
-    allAnimeList.value = []
-  }
-}
-
-// 初始加载
-await Promise.all([
-  loadCollections(),
-  loadAnimeList(),
-  loadAllAnimeList()
-])
+// Load collection list to match ID (could be optimized with a dedicated GET endpoint)
+const { data: collections } = await useAsyncData<Collection[]>(
+  'collections-list',
+  () => $fetch(`${config.public.apiBase}/collections`)
+)
 
 const collection = computed(() => {
   return collections.value?.find(c => c.id === collectionId)
 })
+
+// Load anime list for this collection
+const { data: animeList, pending, refresh } = await useAsyncData<Anime[]>(
+  `collection-${collectionId}-anime`,
+  () => $fetch(`${config.public.apiBase}/collections/${collectionId}/anime`)
+)
+
+// Load All anime for the dropdown
+const { data: allAnimeList } = await useAsyncData<Anime[]>(
+  'all-anime-list',
+  () => $fetch(`${config.public.apiBase}/anime`)
+)
 
 const showAddDialog = ref(false)
 const selectedAnimeId = ref<number | null>(null)
@@ -149,11 +119,61 @@ const addAnimeToCollection = async () => {
     ElMessage.success('添加成功')
     showAddDialog.value = false
     selectedAnimeId.value = null
-    await loadAnimeList()
+    refresh()
   } catch (error) {
     ElMessage.error('添加失败')
     console.error(error)
   }
+}
+
+const removeAnime = (anime: Anime) => {
+  ElMessageBox.confirm(
+    `确定要将 "${anime.title}" 移出收藏夹吗？`,
+    '提示',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  ).then(async () => {
+    try {
+      await $fetch(`${config.public.apiBase}/collections/${collectionId}/anime/${anime.id}`, {
+        method: 'DELETE'
+      })
+      ElMessage.success('已移出')
+      refresh()
+    } catch (error) {
+      ElMessage.error('移出失败')
+      console.error(error)
+    }
+  }).catch(() => { })
+}
+
+const deleteCollection = () => {
+  ElMessageBox.confirm(
+    `确定要删除收藏夹 "${collection.value?.name}" 吗？`,
+    '提示',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  )
+    .then(async () => {
+      try {
+        await $fetch(`${config.public.apiBase}/collections/${collectionId}`, {
+          method: 'DELETE',
+        })
+        ElMessage.success('删除成功')
+        router.push('/collections')
+      } catch (error) {
+        ElMessage.error('删除失败')
+        console.error(error)
+      }
+    })
+    .catch(() => {
+      // 取消
+    })
 }
 
 const goBack = () => {

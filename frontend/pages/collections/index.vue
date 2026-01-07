@@ -7,19 +7,25 @@
           <el-button type="primary" @click="showCreateDialog = true">创建收藏夹</el-button>
         </div>
       </template>
-      <el-table :data="collections || []" style="width: 100%">
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="名称" />
-        <el-table-column prop="description" label="描述" />
-        <el-table-column prop="created_at" label="创建时间" width="180" />
-        <el-table-column label="操作" width="150">
-          <template #default="{ row }">
-            <el-button size="small" @click="goToCollection(row.id)">查看</el-button>
-            <el-button size="small" type="danger" @click="deleteCollection(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="collections && collections.length === 0" description="暂无收藏夹" />
+      <div v-loading="pending">
+        <el-table v-if="!pending && collections && collections.length > 0" :data="collections" style="width: 100%"
+          @row-click="goToCollectionByRow" row-class-name="clickable-row">
+          <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column prop="name" label="名称" />
+          <el-table-column prop="description" label="描述" />
+          <el-table-column label="创建时间" width="200">
+            <template #default="{ row }">
+              {{ formatDate(row.created_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button type="danger" size="small" @click.stop="deleteCollection(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else-if="!pending" description="暂无收藏夹" />
+      </div>
     </el-card>
 
     <el-dialog v-model="showCreateDialog" title="创建收藏夹" width="500px">
@@ -28,12 +34,7 @@
           <el-input v-model="newCollection.name" placeholder="请输入收藏夹名称" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input
-            v-model="newCollection.description"
-            type="textarea"
-            :rows="4"
-            placeholder="请输入描述（可选）"
-          />
+          <el-input v-model="newCollection.description" type="textarea" :rows="4" placeholder="请输入描述（可选）" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -43,6 +44,12 @@
     </el-dialog>
   </div>
 </template>
+
+<style>
+.clickable-row {
+  cursor: pointer;
+}
+</style>
 
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -57,21 +64,10 @@ interface Collection {
 const config = useRuntimeConfig()
 const router = useRouter()
 
-const collections = ref<Collection[]>([])
-
-// 加载数据
-const loadCollections = async () => {
-  try {
-    const data = await $fetch<Collection[]>(`${config.public.apiBase}/collections`)
-    collections.value = data || []
-  } catch (error) {
-    console.error('加载收藏夹列表失败:', error)
-    collections.value = []
-  }
-}
-
-// 初始加载
-await loadCollections()
+const { data: collections, pending, refresh } = await useAsyncData<Collection[]>(
+  'collections-list',
+  () => $fetch(`${config.public.apiBase}/collections`)
+)
 
 const showCreateDialog = ref(false)
 const newCollection = ref({
@@ -99,42 +95,52 @@ const createCollection = async () => {
       name: '',
       description: null
     }
-    // 重新加载数据
-    await loadCollections()
+    refresh()
   } catch (error) {
     ElMessage.error('创建失败')
     console.error(error)
   }
 }
 
-const goToCollection = (id: number) => {
-  router.push(`/collections/${id}`)
+const goToCollectionByRow = (row: Collection) => {
+  router.push(`/collections/${row.id}`)
 }
 
-const deleteCollection = (collection: Collection) => {
+const deleteCollection = (row: Collection) => {
   ElMessageBox.confirm(
-    `确定要删除收藏夹 "${collection.name}" 吗？`,
-    '提示',
+    `确定要删除收藏夹 "${row.name}" 吗？`,
+    '警告',
     {
-      confirmButtonText: '确定',
+      confirmButtonText: '确定删除',
       cancelButtonText: '取消',
       type: 'warning',
     }
   )
     .then(async () => {
       try {
-        await $fetch(`${config.public.apiBase}/collections/${collection.id}`, {
+        await $fetch(`${config.public.apiBase}/collections/${row.id}`, {
           method: 'DELETE',
         })
-        ElMessage.success('删除成功')
-        await loadCollections()
+        ElMessage.success('收藏夹已删除')
+        refresh()
       } catch (error) {
         ElMessage.error('删除失败')
         console.error(error)
       }
     })
     .catch(() => {
-      // 取消
     })
+}
+
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 </script>

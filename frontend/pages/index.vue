@@ -4,25 +4,59 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>番剧列表</span>
-          <el-button type="primary" @click="showCreateDialog = true">添加番剧</el-button>
+          <div style="display: flex; gap: 10px;">
+            <el-radio-group v-model="viewMode" size="small">
+              <el-radio-button label="card">卡片视图</el-radio-button>
+              <el-radio-button label="list">列表视图</el-radio-button>
+            </el-radio-group>
+            <el-button type="primary" @click="showCreateDialog = true">添加番剧</el-button>
+          </div>
         </div>
       </template>
-      <div v-loading="loading">
-        <el-row :gutter="20" v-if="!loading && animeList && animeList.length > 0">
-          <el-col :span="6" v-for="anime in animeList" :key="anime.id" style="margin-bottom: 20px">
-            <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer">
-              <template #header>
-                <div style="font-weight: bold; font-size: 16px">{{ anime.title }}</div>
+      <div v-loading="pending">
+
+        <!-- 卡片视图 -->
+        <div v-if="viewMode === 'card'">
+          <el-row :gutter="20" v-if="!pending && animeList && animeList.length > 0">
+            <el-col :span="6" v-for="anime in animeList" :key="anime.id" style="margin-bottom: 20px">
+              <el-card shadow="hover" @click="goToAnime(anime.id)" style="cursor: pointer">
+                <template #header>
+                  <div style="font-weight: bold; font-size: 16px">{{ anime.title }}</div>
+                </template>
+                <div>
+                  <div v-if="anime.start_date">开播日期: {{ anime.start_date }}</div>
+                  <div v-if="anime.total_episodes">总集数: {{ anime.total_episodes }}</div>
+                  <div v-if="anime.created_at" style="color: #999; font-size: 12px; margin-top: 5px;">
+                    上传于: {{ formatDate(anime.created_at) }}
+                  </div>
+                </div>
+              </el-card>
+            </el-col>
+          </el-row>
+          <el-empty v-else-if="!pending" description="暂无番剧" />
+        </div>
+
+        <!-- 列表视图 -->
+        <div v-else>
+          <el-table v-if="!pending && animeList && animeList.length > 0" :data="animeList" style="width: 100%"
+            @row-click="goToAnimeByRow">
+            <el-table-column prop="title" label="标题" />
+            <el-table-column prop="start_date" label="开播日期" width="120" />
+            <el-table-column prop="total_episodes" label="总集数" width="100" />
+            <el-table-column label="上传时间" width="180">
+              <template #default="{ row }">
+                {{ formatDate(row.created_at) }}
               </template>
-              <div>
-                <div v-if="anime.start_date">开播日期: {{ anime.start_date }}</div>
-                <div v-if="anime.total_episodes">总集数: {{ anime.total_episodes }}</div>
-                <div v-if="anime.source_id">来源ID: {{ anime.source_id }}</div>
-              </div>
-            </el-card>
-          </el-col>
-        </el-row>
-        <el-empty v-if="!loading && (!animeList || animeList.length === 0)" description="暂无番剧" />
+            </el-table-column>
+            <el-table-column label="操作" width="120">
+              <template #default="{ row }">
+                <el-button type="danger" size="small" @click.stop="deleteAnimeInList(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else-if="!pending" description="暂无番剧" />
+        </div>
+
         <div v-if="error" style="text-align: center; padding: 20px; color: #f56c6c;">
           加载失败，请刷新页面重试
         </div>
@@ -37,14 +71,8 @@
               <el-input v-model="newAnime.title" placeholder="请输入番剧标题" />
             </el-form-item>
             <el-form-item label="开播日期">
-              <el-date-picker
-                v-model="newAnime.start_date"
-                type="date"
-                placeholder="选择日期"
-                format="YYYY-MM-DD"
-                value-format="YYYY-MM-DD"
-                style="width: 100%"
-              />
+              <el-date-picker v-model="newAnime.start_date" type="date" placeholder="选择日期" format="YYYY-MM-DD"
+                value-format="YYYY-MM-DD" style="width: 100%" />
             </el-form-item>
             <el-form-item label="总集数">
               <el-input-number v-model="newAnime.total_episodes" :min="1" />
@@ -58,46 +86,40 @@
           <div style="margin-top: 20px">
             <el-form inline>
               <el-form-item label="搜索">
-                <el-input
-                  v-model="searchQuery"
-                  placeholder="输入番剧名称"
-                  @keyup.enter="searchBangumi"
-                  style="width: 300px"
-                />
+                <el-input v-model="searchQuery" placeholder="输入番剧名称" @keyup.enter="searchBangumi"
+                  style="width: 300px" />
               </el-form-item>
               <el-form-item>
                 <el-button type="primary" @click="searchBangumi" :loading="searching">搜索</el-button>
               </el-form-item>
             </el-form>
-            
+
             <div v-if="searchError" style="color: #f56c6c; margin: 10px 0;">
               {{ searchError }}
             </div>
-            
+
             <div v-if="searchResults.length > 0" style="margin-top: 20px; max-height: 400px; overflow-y: auto;">
-              <el-card
-                v-for="result in searchResults"
-                :key="result.id"
-                shadow="hover"
-                style="margin-bottom: 10px; cursor: pointer"
-                @click="selectSearchResult(result)"
-              >
+              <el-card v-for="result in searchResults" :key="result.id" shadow="hover"
+                style="margin-bottom: 10px; cursor: pointer" @click="selectSearchResult(result)">
                 <div style="display: flex;">
                   <div v-if="result.cover_image" style="margin-right: 15px;">
-                    <img :src="result.cover_image" style="width: 80px; height: 112px; object-fit: cover; border-radius: 4px;" />
+                    <img :src="result.cover_image"
+                      style="width: 80px; height: 112px; object-fit: cover; border-radius: 4px;" />
                   </div>
                   <div style="flex: 1;">
                     <div style="font-weight: bold; font-size: 16px; margin-bottom: 8px;">
                       {{ result.title }}
                     </div>
-                    <div v-if="result.name_jp && result.name_jp !== result.title" style="color: #666; margin-bottom: 5px;">
+                    <div v-if="result.name_jp && result.name_jp !== result.title"
+                      style="color: #666; margin-bottom: 5px;">
                       {{ result.name_jp }}
                     </div>
                     <div style="color: #909399; font-size: 12px;">
                       <div v-if="result.start_date">开播日期: {{ result.start_date }}</div>
                       <div v-if="result.total_episodes">集数: {{ result.total_episodes }}</div>
                     </div>
-                    <el-button size="small" type="primary" style="margin-top: 8px;" @click.stop="selectSearchResult(result)">
+                    <el-button size="small" type="primary" style="margin-top: 8px;"
+                      @click.stop="selectSearchResult(result)">
                       选择
                     </el-button>
                   </div>
@@ -107,7 +129,7 @@
           </div>
         </el-tab-pane>
       </el-tabs>
-      
+
       <template #footer>
         <el-button @click="showCreateDialog = false">取消</el-button>
         <el-button type="primary" @click="createAnime">确定</el-button>
@@ -117,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Anime {
   id: number
@@ -142,30 +164,12 @@ interface BangumiSearchResult {
 
 const config = useRuntimeConfig()
 const router = useRouter()
+const viewMode = ref('card')
 
-const animeList = ref<Anime[]>([])
-const loading = ref(true)
-const error = ref(false)
-
-// 加载数据
-const loadAnimeList = async () => {
-  loading.value = true
-  error.value = false
-  try {
-    const data = await $fetch<Anime[]>(`${config.public.apiBase}/anime`)
-    animeList.value = data || []
-  } catch (err) {
-    console.error('加载番剧列表失败:', err)
-    error.value = true
-    animeList.value = []
-    ElMessage.error('加载番剧列表失败，请检查网络连接')
-  } finally {
-    loading.value = false
-  }
-}
-
-// 初始加载
-await loadAnimeList()
+const { data: animeList, pending, error, refresh } = await useAsyncData<Anime[]>(
+  'anime-list',
+  () => $fetch(`${config.public.apiBase}/anime`)
+)
 
 const showCreateDialog = ref(false)
 const activeTab = ref('manual')
@@ -224,7 +228,6 @@ const selectSearchResult = (result: BangumiSearchResult) => {
     total_episodes: result.total_episodes,
     source_id: result.source_id
   }
-  // 切换到手动输入标签页，用户可以看到并确认数据
   activeTab.value = 'manual'
   ElMessage.success('已填充数据，请确认后点击确定')
 }
@@ -256,8 +259,7 @@ const createAnime = async () => {
     searchQuery.value = ''
     searchResults.value = []
     activeTab.value = 'manual'
-    // 重新加载数据
-    await loadAnimeList()
+    refresh()
   } catch (error) {
     ElMessage.error('添加失败')
     console.error(error)
@@ -266,5 +268,47 @@ const createAnime = async () => {
 
 const goToAnime = (id: number) => {
   router.push(`/anime/${id}`)
+}
+
+const goToAnimeByRow = (row: Anime) => {
+  goToAnime(row.id)
+}
+
+const deleteAnimeInList = (anime: Anime) => {
+  ElMessageBox.confirm(
+    '确定要删除这个番剧吗？删除后将无法恢复，包括相关的剧集和评价记录。',
+    '警告',
+    {
+      confirmButtonText: '确定删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  )
+    .then(async () => {
+      try {
+        await $fetch(`${config.public.apiBase}/anime/${anime.id}`, {
+          method: 'DELETE',
+        })
+        ElMessage.success('番剧已删除')
+        refresh()
+      } catch (error) {
+        ElMessage.error('删除失败')
+        console.error(error)
+      }
+    })
+    .catch(() => {
+    })
+}
+
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 </script>

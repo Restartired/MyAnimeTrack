@@ -633,3 +633,26 @@ def search_bangumi(query: str):
         return {"error": f"Bangumi API 错误: {str(e)}", "results": []}
     except Exception as e:
         return {"error": f"搜索失败: {str(e)}", "results": []}
+
+
+# DELETE /collections/{collection_id}/anime/{anime_id}（从收藏夹移除动漫）
+@app.delete("/collections/{collection_id}/anime/{anime_id}")
+def remove_anime_from_collection(collection_id: int, anime_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("""
+            DELETE FROM CollectionAnime 
+            WHERE collection_id = %s AND anime_id = %s
+        """, (collection_id, anime_id))
+        
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()
+        
+    return {"status": "ok"}
